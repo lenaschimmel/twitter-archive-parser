@@ -29,7 +29,23 @@ from typing import Optional
 
 import requests
 
-from parser import read_json_from_js_file
+# FIXME copied the method here to prevent circular import
+# Later everything will be in one file again, so we need neither copied methods nor imports
+def read_json_from_js_file(filename):
+    """Reads the contents of a Twitter-produced .js file into a dictionary."""
+    with open(filename, 'r', encoding='utf8') as f:
+        data = f.readlines()
+        # if the JSON has no real content, it can happen that the file is only one line long.
+        # in this case, return an empty dict to avoid errors while trying to read non-existing lines.
+        if len(data) <= 1:
+            return {}
+        # convert js file to JSON: replace first line with just '[', squash lines into a single string
+        prefix = '['
+        if '{' in data[0]:
+            prefix += ' {'
+        data = prefix + ''.join(data[1:])
+        # parse the resulting JSON and return as a dict
+        return json.loads(data)
 
 
 @dataclass
@@ -100,8 +116,10 @@ class UserIdParser:
         )
         return response.text
 
-    def parse_user_ids_from_archive(self):
+    def parse_user_ids_from_archive(self, tweet_input_filenames):
 
+        # TODO I believe that the files for followings and followers have the same structure,
+        # so that a single method could be called twice to parse both
         # parse followings
         print('parsing following.js ...')
         followings_json = read_json_from_js_file('data/following.js')
@@ -133,34 +151,33 @@ class UserIdParser:
         print(f'found {count_new} more users ids in follower.js\n')
 
         # parse mentions in tweets
-        # TODO: adapt this to work with archives where the tweets are
-        #  in differently named files (tweet.js or tweets-part*.js)
-        print('parsing tweets.js ...')
-        tweets_json = read_json_from_js_file('data/tweets.js')
-        # extract account ids
+        print('parsing tweets...')
         count_new: int = 0
         count_name_added: int = 0
         count_skip_duplicates: int = 0
-        for tweet_dict in tweets_json:
-            tweet = tweet_dict['tweet']
-            if 'user_mentions' in tweet['entities'].keys():
-                for mention in tweet['entities']['user_mentions']:
-                    new_user_id: str = mention["id"]
-                    new_user_display_name: str = mention["name"]
-                    new_user_handle: str = mention["screen_name"]
-                    if new_user_id in self.users.keys() and self.users[new_user_id].handle is None:
-                        self.users[new_user_id].display_name = new_user_display_name
-                        self.users[new_user_id].handle = new_user_handle
-                        count_name_added += 1
-                    elif new_user_id not in self.users.keys():
-                        self.users[new_user_id] = UserData(
-                            id=new_user_id,
-                            display_name=new_user_display_name,
-                            handle=new_user_handle
-                        )
-                        count_new += 1
-                    else:
-                        count_skip_duplicates += 1
+        for tweet_js_filename in tweet_input_filenames:
+            tweets_json = read_json_from_js_file(tweet_js_filename)
+            # extract account ids
+            for tweet_dict in tweets_json:
+                tweet = tweet_dict['tweet']
+                if 'user_mentions' in tweet['entities'].keys():
+                    for mention in tweet['entities']['user_mentions']:
+                        new_user_id: str = mention["id"]
+                        new_user_display_name: str = mention["name"]
+                        new_user_handle: str = mention["screen_name"]
+                        if new_user_id in self.users.keys() and self.users[new_user_id].handle is None:
+                            self.users[new_user_id].display_name = new_user_display_name
+                            self.users[new_user_id].handle = new_user_handle
+                            count_name_added += 1
+                        elif new_user_id not in self.users.keys():
+                            self.users[new_user_id] = UserData(
+                                id=new_user_id,
+                                display_name=new_user_display_name,
+                                handle=new_user_handle
+                            )
+                            count_new += 1
+                        else:
+                            count_skip_duplicates += 1
 
         print(f'found {count_new} new users from mentions.')
         print(f'also added names to {count_name_added} existing users from mentions, '
@@ -232,10 +249,9 @@ class UserIdParser:
             for user in user_lists['users_without_name']:
                 self.users[user['id']] = UserData(**user)
 
-    def write_results_to_json_file(self):
+    def write_results_to_json_file(self, filename):
         # write results into a JSON file:
-        now: str = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        with open(f'parsed_users_{now}.json', 'w', encoding='utf-8') as ids_file:
+        with open(filename, 'w', encoding='utf-8') as ids_file:
             unnamed_users_list = [user.to_dict() for user in self.users_missing_handles()]
             unnamed_users_list.sort(key=lambda u: int(u['id']))
 
@@ -334,7 +350,7 @@ class UserIdParser:
             print(f'{len(self.users_missing_handles())} users without handles.')
 
         else:
-            self.parse_user_ids_from_archive()
+            self.parse_user_ids_from_archive(tweet_input_filenames=['data/tweets.js'])
 
             print('parsed archive. summary:')
             print(f'{len(self.users)} user ids collected,')
@@ -348,7 +364,9 @@ class UserIdParser:
             self.look_for_missing_usernames()
 
         # finally, write results to a new file:
-        self.write_results_to_json_file()
+        now: str = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        filename = f'parsed_users_{now}.json'
+        self.write_results_to_json_file(filename)
 
 
 if __name__ == "__main__":

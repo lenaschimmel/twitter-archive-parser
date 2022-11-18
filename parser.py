@@ -30,6 +30,8 @@ import subprocess
 import sys
 import time
 
+from user_id_parser import UserIdParser
+
 
 # Print a compile-time error. This line does nothing in Python 3 but is reported to the user as an error in Python 2.
 f' Error: You might be using Python 2. This script requires Python 3.'
@@ -304,7 +306,7 @@ def download_larger_media(media_sources, log_path):
     logging.info(f'Time taken: {end_time-start_time:.0f}s')
     print(f'Wrote log to {log_path}')
 
-def resolve_user_names(log_path):
+def resolve_user_names(log_path, tweet_input_filenames):
     """TODO: WRITE DOC STRING
     """
     # Log to file as well as the console
@@ -314,15 +316,40 @@ def resolve_user_names(log_path):
     logging.getLogger().addHandler(logfile_handler)
 
     start_time = time.time()
+    
     # Call to flauschzelle's class: Collect known and missing names from local data
+    user_id_parser = UserIdParser()
+
+    parsed_users_filename = './data/parsed_users.json'
+    if (os.path.exists(parsed_users_filename)):
+        with open(parsed_users_filename, 'r') as past_file:
+            # read from past file:
+            user_id_parser.parse_users_from_json_file(past_file.read())
+        print(f'found user data in file {parsed_users_filename}:')
+        print(f'{len(user_id_parser.users_with_handles())} users with handles.')
+        print(f'{len(user_id_parser.users_missing_handles())} users without handles.')
+
+    else:
+        user_id_parser.parse_user_ids_from_archive(tweet_input_filenames)
+        # Write intermediate result to file. I think there is no risk to lose data
+        # because we only do this if there was no file with this name before
+        user_id_parser.write_results_to_json_file(parsed_users_filename)
+        print('parsed archive. summary:')
+        print(f'{len(user_id_parser.users)} user ids collected,')
+        print(f'including {len(user_id_parser.users_missing_handles())} user ids without a handle.')
 
     # Check if anything is actually missing
+    if len(user_id_parser.users_missing_handles()) > 0:
+        # Call to flauschzelle's class: perform id resolution
+        # make a list of user ids to look up:
+        user_id_parser.user_ids_without_name = [user.to_dict()['id'] for user in user_id_parser.users_missing_handles()]
+        user_id_parser.user_ids_without_name.sort(key=lambda u: int(u))
+        # look them up (with tweeterid):
+        # Later: decide which method to use (flauschzelle's class or the one from https://gist.github.com/n1ckfg/df70c6fa1dabac4fe55cb551364adcc5 )
+        user_id_parser.look_for_missing_usernames()
 
-    # Later: decide which method to use (flauschzelle's class or the one from https://gist.github.com/n1ckfg/df70c6fa1dabac4fe55cb551364adcc5 )
-
-    # Call to flauschzelle's class: perform id resolution
-    logging.info(f'\nSORRY, THIS FEATURE IS NOT ACTUALLY IMPLEMENTED. THERE IS JUST SOME BOILERPLATE FOR NOW.\n')
-
+    # finally, write results to the file:
+    user_id_parser.write_results_to_json_file(parsed_users_filename)
     end_time = time.time()
 
     logging.info(f'Time taken: {end_time-start_time:.0f}s')
@@ -364,7 +391,7 @@ def main():
     username = extract_username(account_js_filename)
 
     # Identify the file and folder names - they change slightly depending on the archive size it seems.
-    input_filenames, archive_media_folder = find_input_filenames(data_folder)
+    tweet_input_filenames, archive_media_folder = find_input_filenames(data_folder)
 
     # Make a folder to copy the images and videos into.
     os.makedirs(output_media_folder_name, exist_ok = True)
@@ -374,7 +401,7 @@ def main():
     # Parse the tweets
     tweets = []
     media_sources = []
-    for tweets_js_filename in input_filenames:
+    for tweets_js_filename in tweet_input_filenames:
         print(f'Parsing {tweets_js_filename}...')
         json = read_json_from_js_file(tweets_js_filename)
         for tweet in json:
@@ -416,7 +443,7 @@ def main():
     print(f'accessible later. Integration into the output may be added at a later date.')
     user_input = input('\nOK to start resolving user IDs? [y/n]')
     if user_input.lower() in ('y', 'yes'):
-        resolve_user_names(log_path_user_ids)
+        resolve_user_names(log_path_user_ids, tweet_input_filenames)
         # Later: parse and rewrite DMs and follower/following lists
 
     # Ask user if they want to try downloading larger images
