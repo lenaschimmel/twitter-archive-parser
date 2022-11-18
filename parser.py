@@ -39,11 +39,15 @@ def read_json_from_js_file(filename):
     """Reads the contents of a Twitter-produced .js file into a dictionary."""
     with open(filename, 'r', encoding='utf8') as f:
         data = f.readlines()
+        # if the JSON has no real content, it can happen that the file is only one line long.
+        # in this case, return an empty dict to avoid errors while trying to read non-existing lines.
+        if len(data) <= 1:
+            return {}
         # convert js file to JSON: replace first line with just '[', squash lines into a single string
         prefix = '['
         if '{' in data[0]:
             prefix += ' {'
-        data =  prefix + ''.join(data[1:])
+        data = prefix + ''.join(data[1:])
         # parse the resulting JSON and return as a dict
         return json.loads(data)
 
