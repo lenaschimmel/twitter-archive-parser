@@ -300,6 +300,29 @@ def download_larger_media(media_sources, log_path):
     logging.info(f'Time taken: {end_time-start_time:.0f}s')
     print(f'Wrote log to {log_path}')
 
+def resolve_user_names(log_path):
+    """TODO: WRITE DOC STRING
+    """
+    # Log to file as well as the console
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO, format='%(message)s')
+    logfile_handler = logging.FileHandler(filename=log_path, mode='w')
+    logfile_handler.setLevel(logging.INFO)
+    logging.getLogger().addHandler(logfile_handler)
+
+    start_time = time.time()
+    # Call to flauschzelle's class: Collect known and missing names from local data
+
+    # Check if anything is actually missing
+
+    # Later: decide which method to use (flauschzelle's class or the one from https://gist.github.com/n1ckfg/df70c6fa1dabac4fe55cb551364adcc5 )
+
+    # Call to flauschzelle's class: perform id resolution
+    logging.info(f'\nSORRY, THIS FEATURE IS NOT ACTUALLY IMPLEMENTED. THERE IS JUST SOME BOILERPLATE FOR NOW.\n')
+
+    end_time = time.time()
+
+    logging.info(f'Time taken: {end_time-start_time:.0f}s')
+    print(f'Wrote log to {log_path}')
 
 def main():
 
@@ -309,7 +332,8 @@ def main():
     output_html_filename = 'TweetArchive.html'
     data_folder = os.path.join(input_folder, 'data')
     account_js_filename = os.path.join(data_folder, 'account.js')
-    log_path = os.path.join(output_media_folder_name, 'download_log.txt')
+    log_path_download = os.path.join(output_media_folder_name, 'download_log.txt')
+    log_path_user_ids = os.path.join(output_media_folder_name, 'user_id_log.txt')
 
     HTML = """\
 <!doctype html>
@@ -379,17 +403,28 @@ def main():
 
     print(f'Wrote tweets to *.md and {output_html_filename}, with images and video embedded from {output_media_folder_name}')
 
+    # Ask user if they want to try resolving user ids
+    print(f"\nSeveral parts of the archive reference other users by their userID, but lack other information")
+    print(f'about those users. This affects your direct messages (one-on-one and groups) and the lists of')
+    print(f'your followers and followings. We can try to resolve the missing information for those userIDs,')
+    print(f'and save them to a file. This script does not yet have the capability to integrate the data into')
+    print(f'human-readable outputs, but it is recommended to resolve it now, just in case it will not be')
+    print(f'accessible later. Integration into the output may be added at a later date.')
+    user_input = input('\nOK to start resolving user IDs? [y/n]')
+    if user_input.lower() in ('y', 'yes'):
+        resolve_user_names(log_path_user_ids)
+        # Later: parse and rewrite DMs and follower/following lists
+
     # Ask user if they want to try downloading larger images
     print(f"\nThe archive doesn't contain the original-size images. We can attempt to download them from twimg.com.")
     print(f'Please be aware that this script may download a lot of data, which will cost you money if you are')
     print(f'paying for bandwidth. Please be aware that the servers might block these requests if they are too')
     print(f'frequent. This script may not work if your account is protected. You may want to set it to public')
     print(f'before starting the download.')
-    user_input = input('\nOK to start downloading? [y/n]')
+    user_input = input('\nOK to start downloading media? [y/n]')
     if user_input.lower() in ('y', 'yes'):
-        download_larger_media(media_sources, log_path)
+        download_larger_media(media_sources, log_path_download)
         print('In case you set your account to public before initiating the download, do not forget to protect it again.')
-
 
 if __name__ == "__main__":
     main()
