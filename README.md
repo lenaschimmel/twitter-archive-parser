@@ -24,7 +24,7 @@ Our script does the following:
 
 ### User ID parser
 
-This version also includes a separate script called [user_id_parser.py]((https://raw.githubusercontent.com/flauschzelle/twitter-archive-parser/userids/parser.py)) that does the following:
+This version also includes a separate script called [user_id_parser.py]((https://raw.githubusercontent.com/flauschzelle/twitter-archive-parser/userids/user_id_parser.py)) that does the following:
 * Collects user IDs appearing somewhere in the Twitter archive (followings, direct messages, etc.).  
 * Matches user IDs to Twitter handles (and sometimes also display names) by looking at mentions and retweets in the archive.
 * Tries to look up any handle that can not be found in the archive itself (because most parts of the archive only contain user IDs and no handles)  via the website [TweeterID](https://tweeterid.com/). 
@@ -34,6 +34,10 @@ This version also includes a separate script called [user_id_parser.py]((https:/
 TweeterID seems to be somewhat unstable, so it might take retrying a few (or even a lot of) times to get all the handles! TweeterID may not be online forever, so it's recommended that you use the *user id parser* now and store the output file for later use. 
 
 When parsing DMs (for example) will be implemented in the main parser later, it might be able to use that output, in case Twitter and/or TweeterID is not online anymore.
+
+WARNING - I forgot to mention this in an earlier version of the README: the `user_id_parser.py` script imports a method from the main [parser.py](https://raw.githubusercontent.com/flauschzelle/twitter-archive-parser/userids/parser.py) script, in which I fixed a bug that affected the user ID parsing. If you had already downloaded the original `parser.py` script before, make sure to update it to this version before running the user id parser!
+
+
 
 ## TODO:
 - Likes ([#22](https://github.com/timhutton/twitter-archive-parser/issues/22)), DMs ([#6](https://github.com/timhutton/twitter-archive-parser/issues/6)), ALT-text ([#20](https://github.com/timhutton/twitter-archive-parser/issues/20)), Followers & Followings ([#70](https://github.com/timhutton/twitter-archive-parser/issues/70))
