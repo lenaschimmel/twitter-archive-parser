@@ -174,6 +174,13 @@ class UserIdParser:
         for dm_dict in dms_json:
             conversation_dict: dict = dm_dict['dmConversation']
             first_message: dict = conversation_dict['messages'][0]
+            if 'messageCreate' not in first_message.keys():
+                for message in conversation_dict['messages']:
+                    if 'messageCreate' in message.keys():
+                        first_message = message
+                        break
+                else:
+                    continue
             recipient_id: str = first_message['messageCreate']['recipientId']
             sender_id: str = first_message['messageCreate']['senderId']
 
