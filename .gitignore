@@ -1,3 +1,4 @@
 # ignore IDE-specific files
-.idea/
-__pycache__/
+.idea
+__pycache__
+.vscode
