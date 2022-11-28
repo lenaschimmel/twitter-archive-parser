@@ -302,8 +302,8 @@ def read_json_from_js_file(filename):
         return json.loads(data)
 
 
-def extract_username(paths: PathConfig):
-    """Returns the user's Twitter userdata from account.js."""
+def extract_user_data(paths: PathConfig) -> UserData:
+    """Returns the user's Twitter user data from account.js."""
     account = read_json_from_js_file(paths.file_account_js)[0]['account']
     return UserData(account['accountId'], account['username'], account['accountDisplayName'])
 
@@ -500,11 +500,11 @@ def has_path(dict, index_path: List[str]):
     return True
 
 
-def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets, URL_template_user_id, paths: PathConfig):
+def convert_tweet(tweet, own_user_data: UserData, media_sources: dict, users, referenced_tweets, URL_template_user_id, paths: PathConfig):
     """Converts a JSON-format tweet. Returns tuple of timestamp, markdown and HTML."""
     # TODO actually use `referenced_tweets`
     tweet = unwrap_tweet(tweet)
-    original_tweet_url = f'https://twitter.com/{userdata.handle}/status/{tweet["id_str"]}'
+    original_tweet_url = f'https://twitter.com/{own_user_data.handle}/status/{tweet["id_str"]}'
     
     header_html = ''
 
@@ -527,7 +527,7 @@ def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets
     author_avatar_url = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' width='64' height='64'%3E%3Crect width='64' height='64' fill='%234a99e9'%3E%3C/rect%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='monospace' font-size='46px' fill='%23fcffff'%3E🧒%3C/text%3E%3C/svg%3E"
     author_name = "UNKNOWN USER"
     author_handle = "???"
-    author_id: str = userdata.id # own tweets from the archive have no user property, so we have to assume
+    author_id: str = own_user_data.id # own tweets from the archive have no user property, so we have to assume
     author_url = "https://twitter.com"
     if has_path(tweet, ['user', 'id_str']):
         author_id = tweet['user']['id_str']
@@ -544,8 +544,6 @@ def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets
         author_handle = users[author_id].handle
         author_name = users[author_id].display_name
         author_url = f"https://twitter.com/{author_handle}"
-
-    print(f"tweet_id_str: {tweet_id_str} author_id: {author_id}, author_handle: {author_handle}, author_name: {author_name}, author_url: {author_url}")
 
     # for old tweets before embedded t.co redirects were added, ensure the links are
     # added to the urls entities list so that we can build correct links later on.
@@ -587,7 +585,7 @@ def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets
             body_html = body_html[len(replying_to):]
         else:
             # no '@userdata.handle ' in the body: we're replying to self
-            replying_to = f'@{userdata.handle}'
+            replying_to = f'@{own_user_data.handle}'
         names = replying_to.split()
         # some old tweets lack 'in_reply_to_screen_name': use it if present, otherwise fall back to names[0]
         in_reply_to_screen_name = tweet['in_reply_to_screen_name'] if 'in_reply_to_screen_name' in tweet else names[0]
@@ -671,7 +669,7 @@ def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets
     body_markdown = '> ' + '\n> '.join(body_markdown.splitlines())
     body_html = '<p><blockquote>' + '<br>\n'.join(body_html.splitlines()) + '</blockquote></p>'
     # append the original Twitter URL as a link
-    original_tweet_url = f'https://twitter.com/{username}/status/{tweet_id_str}'
+    original_tweet_url = f'https://twitter.com/{own_user_data.handle}/status/{tweet_id_str}'
     icon_url = rel_url(paths.file_tweet_icon, paths.example_file_output_tweets) 
     body_markdown = header_markdown + body_markdown + f'\n\n<img src="{icon_url}" width="12" /> ' \
                                                       f'[{timestamp_str}]({original_tweet_url})'
@@ -849,7 +847,7 @@ def download_larger_media(media_sources: dict, paths: PathConfig):
     print(f'Wrote log to {paths.file_download_log}')
 
 
-def parse_tweets(userdata, users, html_template, URL_template_user_id, paths: PathConfig) -> dict:
+def parse_tweets(own_user_data, users, html_template, user_id_url_template, paths: PathConfig) -> dict:
     """Read tweets from paths.files_input_tweets, write to *.md and *.html.
        Copy the media used to paths.dir_output_media.
        Collect user_id:user_handle mappings for later use, in 'users'.
@@ -938,7 +936,7 @@ def parse_tweets(userdata, users, html_template, URL_template_user_id, paths: Pa
     # Third pass: convert tweets, using the downloaded references from pass 2
     for tweet in known_tweets.values():
         try:
-            converted_tweets.append(convert_tweet(tweet, userdata, media_sources, users, referenced_tweets, URL_template_user_id, paths))
+            converted_tweets.append(convert_tweet(tweet, own_user_data, media_sources, users, referenced_tweets, user_id_url_template, paths))
         except Exception as err:
             traceback.print_exc()
             print(f"Could not convert tweet {tweet['id_str']} because: {err}")
@@ -1170,7 +1168,7 @@ def parse_direct_messages(username, users, user_id_url_template, paths: PathConf
                             messages.append((timestamp, message_markdown))
 
             # find identifier for the conversation
-            other_user_id = user2_id if (user1_id in users and users[str(user1_id)].handle == userdata.handle) else user1_id
+            other_user_id = user2_id if (user1_id in users and users[str(user1_id)].handle == username) else user1_id
 
             # collect messages per identifying user in conversations_messages dict
             conversations_messages[other_user_id].extend(messages)
@@ -1630,7 +1628,7 @@ def main():
     paths = PathConfig(dir_archive='.')
 
     # Extract the archive owner's username from data/account.js
-    username = extract_username(paths)
+    own_user_data = extract_user_data(paths)
 
     user_id_url_template = 'https://twitter.com/i/user/{}'
 
@@ -1653,7 +1651,7 @@ def main():
 </html>"""
 
     users = {
-        userdata.id: userdata,
+        own_user_data.id: own_user_data
     }
 
     migrate_old_output(paths)
@@ -1663,7 +1661,7 @@ def main():
     if not os.path.isfile(paths.file_tweet_icon):
         shutil.copy('assets/images/favicon.ico', paths.file_tweet_icon)
 
-    media_sources = parse_tweets(username, users, html_template, paths)
+    media_sources = parse_tweets(own_user_data, users, html_template, user_id_url_template, paths)
 
     following_ids = collect_user_ids_from_followings(paths)
     print(f'found {len(following_ids)} user IDs in followings.')
@@ -1710,8 +1708,8 @@ def main():
 
     parse_followings(users, user_id_url_template, paths)
     parse_followers(users, user_id_url_template, paths)
-    parse_direct_messages(username, users, user_id_url_template, paths)
-    parse_group_direct_messages(username, users, user_id_url_template, paths)
+    parse_direct_messages(own_user_data.handle, users, user_id_url_template, paths)
+    parse_group_direct_messages(own_user_data.handle, users, user_id_url_template, paths)
 
     # Download larger images, if the user agrees
     if len(media_sources) > 0:
