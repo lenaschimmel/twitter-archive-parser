@@ -17,6 +17,7 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+from argparse import ArgumentParser
 from collections import defaultdict
 import math
 from typing import Optional
@@ -1685,9 +1686,24 @@ def find_archive():
 
 
 def main():
-    archive_path = find_archive()
+    p = ArgumentParser(
+        description="Parse a Twitter archive and output in various ways"
+    )
+    p.add_argument("--archive-folder", dest="archive_folder", type=str, default=None,
+                   help="path to the twitter archive folder")
+    args = p.parse_args()
+
+   
+    # use input folder from cli args if given
+    if args.archive_folder and os.path.isdir(args.archive_folder):
+        input_folder = args.archive_folder
+    else:
+        input_folder = find_archive()
+        
+    paths = PathConfig(dir_archive=input_folder)
+
     print (f"\n\nWorking on archive: {os.path.abspath(paths.dir_archive)}")
-    paths = PathConfig(dir_archive=archive_path)
+    paths = PathConfig(dir_archive=input_folder)
 
     # Extract the archive owner's username from data/account.js
     username = extract_username(paths)
