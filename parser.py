@@ -122,7 +122,34 @@ def format_duration(seconds: float) -> str:
         return f"{duration_datetime.second} second{'' if duration_datetime.second == 1 else 's'}"
 
 
-def get_consent(prompt: str, default_to_yes: bool = False):
+def get_config(key: str) -> Optional[str]:
+    """
+    Here you can configure values to skip get_consent prompts. Return 'None' to ask the user,
+    '' to choose accepts the prompt's default, 'y' to accept or 'n' to decline. Future
+    versions of this script may use a proper config file and/or command line args instead of
+    there hardcoded values.
+    """
+    if key == "download_tweets":
+        return None
+    if key == "download_users":
+        return None
+    if key == "download_media":
+        return None
+    if key == "delete_old_files":
+        return None
+    if key == "install_via_pip":
+        return None
+    if key == "lookup_followers":
+        return None
+
+    print(f"Warning: config for key '{key}' not present, asking user instead.")
+    # Hint: if you want the config to be "ask the user" without this warning,
+    # catch the key above and return None before this warning is printed.
+
+    return None
+
+
+def get_consent(prompt: str, key: str, default_to_yes: bool = False):
     """Asks the user for consent, using the given prompt. Accepts various versions of yes/no, or 
     an empty answer to accept the default. The default is 'no' unless default_to_yes is passed as 
     True. The default will be indicated automatically. For unacceptable answers, the user will 
@@ -134,7 +161,12 @@ def get_consent(prompt: str, default_to_yes: bool = False):
         suffix = " [y/N]"
         default_answer = "no"
     while True:
-        user_input = input(prompt + suffix)
+        config_val = get_config(key)
+        if config_val is None:
+            user_input = input(prompt + suffix)
+        else:
+            user_input = config_val
+            print(f"Skipped question: '{prompt}', used config '{config_val}'.")
         if user_input == "":
             print (f"Your empty response was assumed to mean '{default_answer}' (the default for this question).")
             return default_to_yes
@@ -153,7 +185,7 @@ def import_module(module):
         return importlib.import_module(module)
     except ImportError:
         print(f'\nError: This script uses the "{module}" module which is not installed.\n')
-        if not get_consent('OK to install using pip?'):
+        if not get_consent('OK to install using pip?', key='install_via_pip'):
             exit()
         subprocess.run([sys.executable, '-m', 'pip', 'install', module], check=True)
         return importlib.import_module(module)
@@ -264,7 +296,7 @@ def lookup_users(user_ids, users):
     # Account metadata observed at ~2.1KB on average.
     estimated_size = int(2.1 * len(filtered_user_ids))
     print(f'{len(filtered_user_ids)} users are unknown.')
-    if not get_consent(f'Download user data from Twitter (approx {estimated_size:,} KB)?'):
+    if not get_consent(f'Download user data from Twitter (approx {estimated_size:,} KB)?', key='download_users'):
         return
 
     requests = import_module('requests')
@@ -868,7 +900,7 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> dict:
     while (len(tweet_ids_to_download) > 0):
         estimated_download_time_seconds = math.ceil(len(tweet_ids_to_download) / 100) * 2
         estimated_download_time_str = format_duration(estimated_download_time_seconds)
-        if get_consent(f"OK to download {len(tweet_ids_to_download)} tweets from twitter? This would take about {estimated_download_time_str}."):
+        if get_consent(f"OK to download {len(tweet_ids_to_download)} tweets from twitter? This would take about {estimated_download_time_str}.", key='download_tweets'):
             # TODO maybe give an estimate of download size and/or time
             # TODO maybe let the user choose which of the tweets to download, by selecting a subset of those reasons
             requests = import_module('requests')
@@ -1587,7 +1619,7 @@ def migrate_old_output(paths: PathConfig):
             print(file_to_delete)
 
         print()
-        if get_consent('OK to delete these files? (If the the directory layout would not have changed, they would be overwritten anyway)'):
+        if get_consent('OK to delete these files? (If the the directory layout would not have changed, they would be overwritten anyway)', key='delete_old_files'):
             for file_to_delete in files_to_delete:
                 os.remove(file_to_delete)
             print(f"Files have been deleted. New versions of these files will be generated into 'parser-output' soon.")
@@ -1668,7 +1700,7 @@ def main():
         )
 
         if not get_consent(f'Do you want to include handles of your followers '
-                           f'in the online lookup of user handles anyway?', default_to_yes=True):
+                           f'in the online lookup of user handles anyway?', default_to_yes=True, key='lookup_followers'):
             collected_user_ids = collected_user_ids_without_followers
 
     lookup_users(collected_user_ids, users)
@@ -1689,7 +1721,7 @@ def main():
         estimated_download_time_str = format_duration(len(media_sources) * 0.4)
 
         if get_consent(f'OK to start downloading {len(media_sources)} media files? '
-            f'This will take at least {estimated_download_time_str}.'):
+            f'This will take at least {estimated_download_time_str}.', key='download_media'):
 
             download_larger_media(media_sources, paths)
             print('In case you set your account to public before initiating the download, '
