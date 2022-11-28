@@ -294,14 +294,12 @@ def get_tweets(session, bearer_token, guest_token, tweet_ids, include_user=True,
 
 def lookup_users(user_ids, users):
     """Fill the users dictionary with data from Twitter"""
-    # Filter out any users already known
-    filtered_user_ids = [id for id in user_ids if id not in users]
-    if not filtered_user_ids:
+    if not user_ids:
         # Don't bother opening a session if there's nothing to get
         return
     # Account metadata observed at ~2.1KB on average.
-    estimated_size = int(2.1 * len(filtered_user_ids))
-    print(f'{len(filtered_user_ids)} users are unknown.')
+    estimated_size = int(2.1 * len(user_ids))
+    print(f'{len(user_ids)} users are unknown.')
     if not get_consent(f'Download user data from Twitter (approx {estimated_size:,} KB)?', key='download_users'):
         return
 
@@ -313,7 +311,7 @@ def lookup_users(user_ids, users):
         with requests.Session() as session:
             bearer_token = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA'
             guest_token = get_twitter_api_guest_token(session, bearer_token)
-            retrieved_users = get_twitter_users(session, bearer_token, guest_token, filtered_user_ids)
+            retrieved_users = get_twitter_users(session, bearer_token, guest_token, user_ids)
             for user_id, user_info in retrieved_users.items():
                 extended_user_data[user_id] = user_info
             for user_id, user in retrieved_users.items():
@@ -1658,6 +1656,8 @@ def export_user_data(users: dict, extended_user_data: dict, paths: PathConfig):
 
 def main():
     paths = PathConfig(dir_archive='.')
+    print (f"\n\nWorking on archive: {os.path.abspath(paths.dir_archive)}")
+
 
     # Extract the archive owner's username from data/account.js
     username = extract_username(paths)
