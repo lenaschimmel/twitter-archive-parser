@@ -896,11 +896,13 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> dict:
 
     # (Maybe) download referenced tweets
     referenced_tweets = []
-    if (len(tweet_ids_to_download) >0):
-        print(f"Found references to {len(tweet_ids_to_download)} tweets which should be downloaded. Breakdown of download reasons:")
+    if len(tweet_ids_to_download) > 0:
+        print(f"Found references to {len(tweet_ids_to_download)} tweets which should be downloaded. "
+              f"Breakdown of download reasons:")
         for reason in ['quote', 'reply', 'retweet', 'media']:
             print(f" * {counts[reason]} because of {reason}")
-        print(f"There were {counts['known_reply']} references to tweets which are already known so we don't need to download them (not included in the numbers above).")
+        print(f"There were {counts['known_reply']} references to tweets which are already known "
+              f"so we don't need to download them (not included in the numbers above).")
         print()
         print("Please note that the downloaded tweets will not be included in the generated output yet.")
         print("Anyway, we recommend to download the tweets now, just in case Twitter (or its API which")
@@ -908,19 +910,27 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> dict:
         print("include the downloaded tweets into the output, even if Twitter should not be available then.")
         print()
 
-    while (len(tweet_ids_to_download) > 0):
+    retried_times = 0
+    max_retries = 5
+
+    while len(tweet_ids_to_download) > 0 and retried_times < max_retries:
         estimated_download_time_seconds = math.ceil(len(tweet_ids_to_download) / 100) * 2
         estimated_download_time_str = format_duration(estimated_download_time_seconds)
-        if get_consent(f"OK to download {len(tweet_ids_to_download)} tweets from twitter? This would take about {estimated_download_time_str}.", key='download_tweets'):
+        if get_consent(f"OK to download {len(tweet_ids_to_download)} tweets from twitter? "
+                       f"This would take about {estimated_download_time_str}.", key='download_tweets'):
             # TODO maybe give an estimate of download size and/or time
             # TODO maybe let the user choose which of the tweets to download, by selecting a subset of those reasons
             requests = import_module('requests')
             try:
                 with requests.Session() as session:
-                    bearer_token = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA'
+                    bearer_token = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xn' \
+                                   'Zz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA'
                     guest_token = get_twitter_api_guest_token(session, bearer_token)
-                    # TODO We could download user data together with the tweets, because we will need it anyway. But we might download the data for each user multiple times then.
-                    downloaded_tweets, tweet_ids_to_download = get_tweets(session, bearer_token, guest_token, list(tweet_ids_to_download), False)
+                    # TODO We could download user data together with the tweets, because we will need it anyway.
+                    #  But we might download the data for each user multiple times then.
+                    downloaded_tweets, tweet_ids_to_download = get_tweets(
+                        session, bearer_token, guest_token, list(tweet_ids_to_download), False
+                    )
 
                     for downloaded_tweet in downloaded_tweets.values():
                         downloaded_tweet = unwrap_tweet(downloaded_tweet)
@@ -935,8 +945,10 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> dict:
             except Exception as err:
                 # this code is rather unlikely to be reached, since get_tweets has internal error handling.
                 print(f'Failed to download tweets: {err}')
+                time.sleep(2)  # sleep 2 seconds before trying again to avoid rate-limit
 
             if len(tweet_ids_to_download) > 0:
+                retried_times += 1
                 print("Not all tweets could be downloaded, but you can retry if you want.")
         else:
             # Don't ask again and again if the user said 'no'
