@@ -45,10 +45,18 @@ f' Error: This script requires Python 3.6 or later. Use `python --version` to ch
 
 
 class UserData:
-    def __init__(self, id, handle = None):
-        self.id = id
+    def __init__(self, id, handle = None, display_name = None):
+        self.id = str(id)
         self.handle = handle
+        self.display_name = display_name
 
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'handle': self.handle,
+            'display_name': self.display_name,
+        }
+    
 
 class PathConfig:
     """
@@ -189,7 +197,7 @@ def get_twitter_api_guest_token(session, bearer_token):
 # fetched users, but also make it clear that it is incomplete. Maybe do it like in get_tweets.
 def get_twitter_users(session, bearer_token, guest_token, user_ids):
     """Asks Twitter for all metadata associated with user_ids."""
-    users = {}
+    result_users = {}
     while user_ids:
         max_batch = 100
         user_id_batch = user_ids[:max_batch]
@@ -204,8 +212,8 @@ def get_twitter_users(session, bearer_token, guest_token, user_ids):
             raise Exception(f'Failed to get user handle: {response}')
         response_json = json.loads(response.content)
         for user in response_json:
-            users[user["id_str"]] = user
-    return users
+            result_users[user["id_str"]] = user
+    return result_users
 
 
 def get_tweets(session, bearer_token, guest_token, tweet_ids, include_user=True, include_alt_text=True):
@@ -270,7 +278,7 @@ def lookup_users(user_ids, users):
             guest_token = get_twitter_api_guest_token(session, bearer_token)
             retrieved_users = get_twitter_users(session, bearer_token, guest_token, filtered_user_ids)
             for user_id, user in retrieved_users.items():
-                users[user_id] = UserData(user_id, user["screen_name"])
+                users[str(user_id)] = UserData(id=user_id, handle=user["screen_name"], display_name=user["name"])
         print()  # empty line for better readability of output
     except Exception as err:
         print(f'Failed to download user data: {err}')
@@ -295,9 +303,9 @@ def read_json_from_js_file(filename):
 
 
 def extract_username(paths: PathConfig):
-    """Returns the user's Twitter username from account.js."""
-    account = read_json_from_js_file(paths.file_account_js)
-    return account[0]['account']['username']
+    """Returns the user's Twitter userdata from account.js."""
+    account = read_json_from_js_file(paths.file_account_js)[0]['account']
+    return UserData(account['accountId'], account['username'], account['accountDisplayName'])
 
 
 def escape_markdown(input_text: str) -> str:
@@ -492,16 +500,53 @@ def has_path(dict, index_path: List[str]):
     return True
 
 
-def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets, paths: PathConfig):
+def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets, URL_template_user_id, paths: PathConfig):
     """Converts a JSON-format tweet. Returns tuple of timestamp, markdown and HTML."""
     # TODO actually use `referenced_tweets`
     tweet = unwrap_tweet(tweet)
+    original_tweet_url = f'https://twitter.com/{userdata.handle}/status/{tweet["id_str"]}'
+    
+    header_html = ''
+
+    # Explicitly unpack retweeted tweet
+    if has_path(tweet, ['retweeted_status']):
+        # TODO Retweets have two URLs: One for the "inner" tweet (by the original author), and another for
+        tweet = unwrap_tweet(tweet['retweeted_status'])
+        header_html = "Retweeted:<br/>"
+
     timestamp_str = tweet['created_at']
     timestamp = int(round(datetime.datetime.strptime(timestamp_str, '%a %b %d %X %z %Y').timestamp()))
     # Example: Tue Mar 19 14:05:17 +0000 2019
     body_markdown = tweet['full_text']
     body_html = tweet['full_text']
     tweet_id_str = tweet['id_str']
+
+    # Emoticon: 
+    #author_avatar_url = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' width='64' height='64'%3E%3Crect width='64' height='64' fill='%234a99e9'%3E%3C/rect%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='monospace' font-size='26px' fill='%23fcffff'%3E:'(%3C/text%3E%3C/svg%3E"
+    # Emoji:
+    author_avatar_url = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' width='64' height='64'%3E%3Crect width='64' height='64' fill='%234a99e9'%3E%3C/rect%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='monospace' font-size='46px' fill='%23fcffff'%3E🧒%3C/text%3E%3C/svg%3E"
+    author_name = "UNKNOWN USER"
+    author_handle = "???"
+    author_id: str = userdata.id # own tweets from the archive have no user property, so we have to assume
+    author_url = "https://twitter.com"
+    if has_path(tweet, ['user', 'id_str']):
+        author_id = tweet['user']['id_str']
+        author_url = URL_template_user_id.format(author_id)
+    elif has_path(tweet, ['user', 'id']):
+        author_id = str(tweet['user']['id'])
+        author_url = URL_template_user_id.format(author_id)
+
+    # print(f"")
+    # for k,v in users.items():
+    #     print(f"{repr(k)}: {v.to_dict()}")
+    
+    if author_id in users.keys():
+        author_handle = users[author_id].handle
+        author_name = users[author_id].display_name
+        author_url = f"https://twitter.com/{author_handle}"
+
+    print(f"tweet_id_str: {tweet_id_str} author_id: {author_id}, author_handle: {author_handle}, author_name: {author_name}, author_url: {author_url}")
+
     # for old tweets before embedded t.co redirects were added, ensure the links are
     # added to the urls entities list so that we can build correct links later on.
     if 'entities' in tweet and 'media' not in tweet['entities'] and len(tweet['entities'].get("urls", [])) == 0:
@@ -533,16 +578,16 @@ def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets
     # if the tweet is a reply, construct a header that links the names
     # of the accounts being replied to the tweet being replied to
     header_markdown = ''
-    header_html = ''
-    if 'in_reply_to_status_id' in tweet:
-        # match and remove all occurrences of '@username ' at the start of the body
+    header_html += f'<div class="tweetHead"><img src="{author_avatar_url}"> <a href="{author_url}">{author_name}<br/><small>@{author_handle}</small></a></div>'
+    if has_path(tweet, ['in_reply_to_status_id']):
+        # match and remove all occurrences of '@userdata.handle ' at the start of the body
         replying_to = re.match(r'^(@[0-9A-Za-z_]* )*', body_markdown)[0]
         if replying_to:
             body_markdown = body_markdown[len(replying_to):]
             body_html = body_html[len(replying_to):]
         else:
-            # no '@username ' in the body: we're replying to self
-            replying_to = f'@{username}'
+            # no '@userdata.handle ' in the body: we're replying to self
+            replying_to = f'@{userdata.handle}'
         names = replying_to.split()
         # some old tweets lack 'in_reply_to_screen_name': use it if present, otherwise fall back to names[0]
         in_reply_to_screen_name = tweet['in_reply_to_screen_name'] if 'in_reply_to_screen_name' in tweet else names[0]
@@ -551,9 +596,10 @@ def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets
         in_reply_to_status_id = tweet['in_reply_to_status_id']
         replying_to_url = f'https://twitter.com/{in_reply_to_screen_name}/status/{in_reply_to_status_id}'
         header_markdown += f'Replying to [{escape_markdown(name_list)}]({replying_to_url})\n\n'
-        header_html += f'Replying to <a href="{replying_to_url}">{name_list}</a><br>'
+        header_html = f'Replying to <a href="{replying_to_url}">{name_list}</a><br>' + header_html
     # escape tweet body for markdown rendering:
     body_markdown = escape_markdown(body_markdown)
+
     # replace image URLs with image links to local files
     if has_path(tweet, ['entities', 'media']) and has_path(tweet, ['extended_entities', 'media']) \
         and len(tweet['entities']['media']) > 0 and 'url' in tweet['entities']['media'][0]:
@@ -623,7 +669,7 @@ def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets
         body_html = body_html.replace(original_url, html)
     # make the body a quote
     body_markdown = '> ' + '\n> '.join(body_markdown.splitlines())
-    body_html = '<p><blockquote>' + '<br>\n'.join(body_html.splitlines()) + '</blockquote>'
+    body_html = '<p><blockquote>' + '<br>\n'.join(body_html.splitlines()) + '</blockquote></p>'
     # append the original Twitter URL as a link
     original_tweet_url = f'https://twitter.com/{username}/status/{tweet_id_str}'
     icon_url = rel_url(paths.file_tweet_icon, paths.example_file_output_tweets) 
@@ -632,17 +678,19 @@ def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets
     body_html = header_html + body_html + f'<a href="{original_tweet_url}"><img src="{icon_url}" ' \
                                           f'width="12" />&nbsp;{timestamp_str}</a></p>'
     # extract user_id:handle connections
-    if 'in_reply_to_user_id' in tweet and 'in_reply_to_screen_name' in tweet:
-        id = tweet['in_reply_to_user_id']
-        if id is not None and int(id) >= 0: # some ids are -1, not sure why
-            handle = tweet['in_reply_to_screen_name']
-            users[id] = UserData(id=id, handle=handle)
-    if 'entities' in tweet and 'user_mentions' in tweet['entities'] and tweet['entities']['user_mentions'] is not None:
-        for mention in tweet['entities']['user_mentions']:
-            id = mention['id']
-            if int(id) >= 0: # some ids are -1, not sure why
-                handle = mention['screen_name']
-                users[id] = UserData(id=id, handle=handle)
+    # if 'in_reply_to_user_id' in tweet and 'in_reply_to_screen_name' in tweet:
+    #     id = tweet['in_reply_to_user_id']
+    #     if id is not None and int(id) >= 0: # some ids are -1, not sure why
+    #         handle = tweet['in_reply_to_screen_name']
+    #         # TODO do not overwrite existing users that have a name with new users that don't have it
+    #         users[str(id)] = UserData(id=id, handle=handle)
+    # if 'entities' in tweet and 'user_mentions' in tweet['entities'] and tweet['entities']['user_mentions'] is not None:
+    #     for mention in tweet['entities']['user_mentions']:
+    #         id = mention['id']
+    #         if int(id) >= 0: # some ids are -1, not sure why
+    #             handle = mention['screen_name']
+    #             name = mention['name']
+    #             users[str(id)] = UserData(id=id, handle=handle, display_name=name)
 
     return timestamp, body_markdown, body_html
 
@@ -801,7 +849,7 @@ def download_larger_media(media_sources: dict, paths: PathConfig):
     print(f'Wrote log to {paths.file_download_log}')
 
 
-def parse_tweets(username, users, html_template, paths: PathConfig) -> dict:
+def parse_tweets(userdata, users, html_template, URL_template_user_id, paths: PathConfig) -> dict:
     """Read tweets from paths.files_input_tweets, write to *.md and *.html.
        Copy the media used to paths.dir_output_media.
        Collect user_id:user_handle mappings for later use, in 'users'.
@@ -890,10 +938,11 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> dict:
     # Third pass: convert tweets, using the downloaded references from pass 2
     for tweet in known_tweets.values():
         try:
-            converted_tweets.append(convert_tweet(tweet, username, media_sources, users, referenced_tweets, paths))
+            converted_tweets.append(convert_tweet(tweet, userdata, media_sources, users, referenced_tweets, URL_template_user_id, paths))
         except Exception as err:
+            traceback.print_exc()
             print(f"Could not convert tweet {tweet['id_str']} because: {err}")
-    converted_tweets.sort(key=lambda tup: tup[0]) # oldest first
+    #converted_tweets.sort(key=lambda tup: tup[0]) # oldest first
 
     # Group tweets by month
     grouped_tweets = defaultdict(list)
@@ -1033,7 +1082,7 @@ def parse_direct_messages(username, users, user_id_url_template, paths: PathConf
                     if 'messageCreate' in message:
                         message_create = message['messageCreate']
                         if all(tag in message_create for tag in ['senderId', 'recipientId', 'text', 'createdAt']):
-                            from_id = message_create['senderId']
+                            from_id = str(message_create['senderId'])
                             to_id = message_create['recipientId']
                             body = message_create['text']
                             # replace t.co URLs with their original versions
@@ -1121,7 +1170,7 @@ def parse_direct_messages(username, users, user_id_url_template, paths: PathConf
                             messages.append((timestamp, message_markdown))
 
             # find identifier for the conversation
-            other_user_id = user2_id if (user1_id in users and users[user1_id].handle == username) else user1_id
+            other_user_id = user2_id if (user1_id in users and users[str(user1_id)].handle == userdata.handle) else user1_id
 
             # collect messages per identifying user in conversations_messages dict
             conversations_messages[other_user_id].extend(messages)
@@ -1136,7 +1185,7 @@ def parse_direct_messages(username, users, user_id_url_template, paths: PathConf
         other_user_name = escape_markdown(users[other_user_id].handle) if other_user_id in users \
             else user_id_url_template.format(other_user_id)
 
-        other_user_short_name: str = users[other_user_id].handle if other_user_id in users else other_user_id
+        other_user_short_name: str = users[str(other_user_id)].handle if other_user_id in users else other_user_id
 
         escaped_username = escape_markdown(username)
 
@@ -1603,7 +1652,9 @@ def main():
 </body>
 </html>"""
 
-    users = {}
+    users = {
+        userdata.id: userdata,
+    }
 
     migrate_old_output(paths)
 
