@@ -130,17 +130,17 @@ def get_config(key: str) -> Optional[str]:
     there hardcoded values.
     """
     if key == "download_tweets":
-        return None
+        return "y"
     if key == "download_users":
-        return None
+        return "y"
     if key == "download_media":
-        return None
+        return "n"
     if key == "delete_old_files":
-        return None
+        return "y"
     if key == "install_via_pip":
-        return None
+        return "y"
     if key == "lookup_followers":
-        return None
+        return "y"
 
     print(f"Warning: config for key '{key}' not present, asking user instead.")
     # Hint: if you want the config to be "ask the user" without this warning,
