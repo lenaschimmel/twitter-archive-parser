@@ -77,9 +77,7 @@ class PathConfig:
 
         # check if user is in correct folder
         if not os.path.isfile(self.file_account_js):
-            print(
-                f'Error: Failed to load {self.file_account_js}. '
-                f'Start this script in the root folder of your Twitter archive.')
+            print(f'Error: Failed to load {self.file_account_js}. ')
             exit()
 
         self.dir_input_media                = find_dir_input_media(self.dir_input_data)
@@ -1654,10 +1652,42 @@ def export_user_data(users: dict, extended_user_data: dict, paths: PathConfig):
         print('extended user data saved.\n')
 
 
-def main():
-    paths = PathConfig(dir_archive='.')
-    print (f"\n\nWorking on archive: {os.path.abspath(paths.dir_archive)}")
+def is_archive(path):
+    """Return true if there is a Twitter archive at the given path"""
+    return os.path.isfile(os.path.join(path, 'data', 'account.js'))
 
+
+def find_archive():
+    """
+    Search for the archive
+    1. First try the working directory.
+    2. Then try the script directory.
+    3. Finally prompt the user.
+    """
+    if is_archive('.'):
+        return '.'
+    script_dir = os.path.dirname(__file__)
+    if script_dir != os.getcwd():
+        if is_archive(script_dir):
+            return script_dir
+    print('Archive not found in working directory or script directory.\n'
+          'Please enter the path of your Twitter archive, or just press Enter to exit.\n'
+          'On most operating systems, you can also try to drag and drop your archive folder '
+          'into the terminal window, and it will paste its path automatically.\n')
+    # Give the user as many attempts as they need.
+    while True:
+        input_path = input('Archive path: ')
+        if not input_path:
+            exit()
+        if is_archive(input_path):
+            return input_path
+        print(f'Archive not found at {input_path}')
+
+
+def main():
+    archive_path = find_archive()
+    print (f"\n\nWorking on archive: {os.path.abspath(paths.dir_archive)}")
+    paths = PathConfig(dir_archive=archive_path)
 
     # Extract the archive owner's username from data/account.js
     username = extract_username(paths)
