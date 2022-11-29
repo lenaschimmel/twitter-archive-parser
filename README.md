@@ -1,3 +1,10 @@
+## Archivemode fork / branch
+You're currently viewing the branch `archivemode` of @lenaschimmel's fork of `twitter-archive-parser`.
+
+**This is a version which focusses on downloading and saving data from twitter before the site becomes unstable or unavailable. Consider this as a *preview* or *alpha* version, with a *do it quicky instead of doing it nicely* development attitude. Apart from this additional paragraph, the documentation has not been updated to reflect the development of this version.**
+
+We hope that most features will be included into the original `twitter-archive-parser` soon. Also, we hope that all the data that you save with this version can be processed with the mainline version later on.
+
 ## How do I use it?
 1. [Download your Twitter archive](https://twitter.com/settings/download_your_data) (Settings > Your account > Download an archive of your data).
 2. Unzip to a folder.
