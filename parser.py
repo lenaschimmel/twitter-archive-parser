@@ -937,6 +937,7 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> dict:
                         downloaded_tweet['download_with_user'] = False
                         downloaded_tweet['download_with_alt_text'] = True
                         add_known_tweet(known_tweets, downloaded_tweet)
+                    print("Download finished. Saving tweets to disk - do not kill this script until this is done!")
                     with open(tweet_dict_filename, "w") as outfile:
                         json.dump(known_tweets, outfile, indent=2)
                     print(f"Saved {len(known_tweets)} tweets to '{tweet_dict_filename}'.")
