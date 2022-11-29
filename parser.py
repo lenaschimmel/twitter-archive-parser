@@ -551,6 +551,8 @@ def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets
     timestamp_str = tweet['created_at']
     timestamp = int(round(datetime.datetime.strptime(timestamp_str, '%a %b %d %X %z %Y').timestamp()))
     # Example: Tue Mar 19 14:05:17 +0000 2019
+    if tweet['full_text'] is None:
+        raise ValueError('full_text of tweet is empty - tweet or user has probably been withheld.')
     body_markdown = tweet['full_text']
     body_html = tweet['full_text']
     tweet_id_str = tweet['id_str']
@@ -607,14 +609,14 @@ def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets
     # escape tweet body for markdown rendering:
     body_markdown = escape_markdown(body_markdown)
     # replace image URLs with image links to local files
-    if has_path(tweet, ['entities', 'media']) and has_path(tweet, ['extended_entities', 'media']) \
-        and len(tweet['entities']['media']) > 0 and 'url' in tweet['entities']['media'][0]:
+    if has_path(tweet, ['entities', 'media']) and has_path(tweet, ['extended_entities', 'media']) and \
+            len(tweet['entities']['media']) > 0 and 'url' in tweet['entities']['media'][0]:
             
         original_url = tweet['entities']['media'][0]['url']
         markdown = ''
         html = ''
         for media in tweet['extended_entities']['media']:
-            if 'url' in media and 'media_url' in media:
+            if 'url' in media and 'media_url' in media and media['media_url'] is not None:
                 original_expanded_url = media['media_url']
                 original_filename = os.path.split(original_expanded_url)[1]
                 archive_media_filename = tweet_id_str + '-' + original_filename
@@ -865,7 +867,7 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> dict:
     converted_tweets = []
     media_sources = {}
     counts = defaultdict(int)
-    known_tweets = {}
+    known_tweets: dict[str, dict] = dict()
 
     # TODO If we run this tool multiple times, in `known_tweets` we will have our own tweets as
     # well as related tweets by others. With each run, the tweet graph is expanded. We probably do
