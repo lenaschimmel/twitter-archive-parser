@@ -580,6 +580,13 @@ def has_path(dict, index_path: List[str]):
     return True
 
 
+class EmptyTweetFullTextError(ValueError):
+    """
+    custom error class for tweets with empty full_text
+    """
+    pass
+
+
 def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets, paths: PathConfig):
     """Converts a JSON-format tweet. Returns tuple of timestamp, markdown and HTML."""
     # TODO actually use `referenced_tweets`
@@ -588,7 +595,7 @@ def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets
     timestamp = int(round(datetime.datetime.strptime(timestamp_str, '%a %b %d %X %z %Y').timestamp()))
     # Example: Tue Mar 19 14:05:17 +0000 2019
     if tweet['full_text'] is None:
-        raise ValueError('empty full_text - tweet or user has probably been withheld.')
+        raise EmptyTweetFullTextError('empty full_text - tweet or user has probably been withheld.')
     body_markdown = tweet['full_text']
     body_html = tweet['full_text']
     tweet_id_str = tweet['id_str']
@@ -1051,8 +1058,10 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> (dict, di
     # Third pass: convert tweets, using the downloaded references from pass 2
     for tweet in known_tweets.values():
         try:
-            if 'from_archive' in tweet and tweet['from_archive'] == True:
+            if 'from_archive' in tweet and tweet['from_archive'] is True:
                 converted_tweets.append(convert_tweet(tweet, username, media_sources, users, referenced_tweets, paths))
+        except EmptyTweetFullTextError as err:
+            print(f"Could not convert tweet {tweet['id_str']} because: {err}")
         except Exception as err:
             traceback.print_exc()
             print(f"Could not convert tweet {tweet['id_str']} because: {err}")
