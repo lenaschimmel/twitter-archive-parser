@@ -20,7 +20,7 @@
 from argparse import ArgumentParser
 from collections import defaultdict
 import math
-from typing import Optional
+from typing import Optional, Tuple
 from urllib.parse import urlparse
 import datetime
 import glob
@@ -252,13 +252,15 @@ def get_twitter_users(session, bearer_token, guest_token, user_ids):
     return users
 
 
-def get_tweets(session, bearer_token, guest_token, tweet_ids, include_user=True, include_alt_text=True):
+def get_tweets(session, bearer_token, guest_token, tweet_ids: list[str], include_user=True, include_alt_text=True) -> Tuple[dict[str, Optional[dict]], list[str]]:
     """Get the json metadata for multiple tweets.
     If include_user is False, you will only get a numerical id for the user.
-    Returns `tweets, remaining_tweet_ids` where `tweets`. If all goes well, `tweets` will contain all
-    tweets, and `remaining_tweet_ids` is empty. If something goes wrong, downloading is stopped
-    and only the tweets we got until then are returned. 
-    TODO In some cases, up to 100 tweets may be both in `tweets` and `remaining_tweet_ids`."""
+    Requested tweets may be unavailable for two reasons:
+     - the API request fails, e.g. due to network errors or rate limiting (probably temporary problem)
+     - the API explicitly returns `null` for the tweet (probably permanent problem, e.g. tweet was deleted)
+    This function will include null values in the first part of the returned tuple. Only tweets which are
+    absent due to (probably) temporary problems are listed with their id in the second part of the return value.
+    """
     tweets = {}
     remaining_tweet_ids = tweet_ids.copy()
     try:
@@ -267,7 +269,7 @@ def get_tweets(session, bearer_token, guest_token, tweet_ids, include_user=True,
             tweet_id_batch = remaining_tweet_ids[:max_batch]
             tweet_id_list = ",".join(map(str,tweet_id_batch))
             print(f"Download {len(tweet_id_batch)} tweets of {len(remaining_tweet_ids)} remaining...")
-            query_url = f"https://api.twitter.com/1.1/statuses/lookup.json?id={tweet_id_list}&tweet_mode=extended"
+            query_url = f"https://api.twitter.com/1.1/statuses/lookup.json?id={tweet_id_list}&tweet_mode=extended&map=true"
             if not include_user:
                 query_url += "&trim_user=1"
             if include_alt_text:
@@ -280,12 +282,10 @@ def get_tweets(session, bearer_token, guest_token, tweet_ids, include_user=True,
                 continue
             if not response.status_code == 200:
                 raise Exception(f'Failed to get tweets: {response}')
-            response_json = json.loads(response.content)
-            for tweet in response_json:
-                if "id_str" in tweet:
-                    tweets[tweet["id_str"]] = tweet
-                else:
-                    print (f"Tweet could not be returned because it has no id: {tweet}")
+            response_json = json.loads(response.content)['id'] # when map=true, everything is under a key 'id'
+            for tweet_id in response_json:
+                tweet = response_json[tweet_id]
+                tweets[tweet_id] = tweet
             remaining_tweet_ids = remaining_tweet_ids[max_batch:]
     except Exception as err:
         traceback.print_exc()
@@ -439,7 +439,7 @@ def merge_dicts(a, b, path=None):
                 pass # same leaf value
             elif key == 'retweet_count' or key == 'favorite_count':
                 a[key] = max(parse_as_number(a[key]), parse_as_number(b[key]))
-            elif key in ['possibly_sensitive']:
+            elif key in ['possibly_sensitive', 'monetizable']:
                 # ignore conflicts in unimportant fields that tend to differ
                 pass
             elif parse_as_number(a[key]) == parse_as_number(b[key]):
@@ -459,28 +459,36 @@ def merge_dicts(a, b, path=None):
 
 
 def unwrap_tweet(tweet):
+    if tweet is None:
+        return None
     if 'tweet' in tweet.keys():
         return tweet['tweet']
     else:
         return tweet
 
 
-def add_known_tweet(known_tweets, new_tweet):
-    tweet_id = new_tweet['id_str']
-    if tweet_id in known_tweets:
-        if known_tweets[tweet_id] == new_tweet:
-            pass
-            #print(f"Tweet {tweet_id} was already known with identical contents")
+def add_known_tweet(known_tweets, tweet_id, new_tweet):
+    """Adds the new_tweet to known_tweets, possibly merging old and new tweets. If new_tweet is 
+    None, it will be marked with 'api_returned_null' in known_tweets, no matter if it was contained 
+    there before or not."""
+    if new_tweet is not None:
+        if tweet_id in known_tweets:
+            if known_tweets[tweet_id] == new_tweet:
+                pass
+            else:
+                try:
+                    merge_dicts(known_tweets[tweet_id], new_tweet)
+                except Exception as err:
+                    print(traceback.format_exc())
+                    print(f"Tweet {tweet_id} could not be merged: {err}")
         else:
-            try:
-                merge_dicts(known_tweets[tweet_id], new_tweet)
-            except Exception as err:
-                print(traceback.format_exc())
-                print(f"Tweet {tweet_id} could not be merged: {err}")
-                
-    else:
-        #print(f"Tweet {tweet_id} is new")
-        known_tweets[tweet_id] = new_tweet
+            known_tweets[tweet_id] = new_tweet
+    else: # new_tweet is None
+        # Mark tweet as unavailable via the API
+        if tweet_id in known_tweets:
+            known_tweets[tweet_id]['api_returned_null'] = True
+        else:
+            known_tweets[tweet_id] = { 'id': tweet_id, 'id_str': tweet_id, 'api_returned_null': True }
 
 
 def collect_tweet_references(tweet, known_tweets, counts):
@@ -506,9 +514,8 @@ def collect_tweet_references(tweet, known_tweets, counts):
                         tweet_ids.add(quoted_id)
                         counts['quote'] += 1
 
-    # Collect previous tweets in conversation
-    # Only do this for tweets from our original archive
-    if 'from_archive' in tweet and has_path(tweet, ['in_reply_to_status_id_str']):
+    # Collect previous tweet in conversation
+    if has_path(tweet, ['in_reply_to_status_id_str']):
         prev_tweet_id = tweet['in_reply_to_status_id_str']
         if (prev_tweet_id in known_tweets):
             counts['known_reply'] += 1
@@ -516,7 +523,7 @@ def collect_tweet_references(tweet, known_tweets, counts):
             tweet_ids.add(prev_tweet_id)
             counts['reply'] += 1
 
-    # Collect retweets
+    # Collect retweets (adds the tweet itself)
     # Don't do this if we already re-downloaded this tweet
     if not 'from_api' in tweet and 'full_text' in tweet and tweet['full_text'].startswith('RT @'):
         tweet_ids.add(tweet['id_str'])
@@ -890,7 +897,7 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> dict:
         for tweet in json_result:
             tweet = unwrap_tweet(tweet)
             tweet['from_archive'] = True
-            add_known_tweet(known_tweets, tweet)
+            add_known_tweet(known_tweets, tweet['id_str'], tweet)
 
     tweet_ids_to_download = set()
     
@@ -917,6 +924,11 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> dict:
     retried_times = 0
     max_retries = 5
 
+    if len(tweet_ids_to_download) == 0:
+        print("All referenced tweets are present, nothing to download.")
+
+    initial_tweet_ids_to_download = tweet_ids_to_download.copy()
+
     while len(tweet_ids_to_download) > 0 and retried_times < max_retries:
         estimated_download_time_seconds = math.ceil(len(tweet_ids_to_download) / 100) * 2
         estimated_download_time_str = format_duration(estimated_download_time_seconds)
@@ -936,12 +948,15 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> dict:
                         session, bearer_token, guest_token, list(tweet_ids_to_download), False
                     )
 
-                    for downloaded_tweet in downloaded_tweets.values():
-                        downloaded_tweet = unwrap_tweet(downloaded_tweet)
-                        downloaded_tweet['from_api'] = True
-                        downloaded_tweet['download_with_user'] = False
-                        downloaded_tweet['download_with_alt_text'] = True
-                        add_known_tweet(known_tweets, downloaded_tweet)
+                    for downloaded_tweet_id in downloaded_tweets:
+                        downloaded_tweet = downloaded_tweets[downloaded_tweet_id]
+                        # downloaded_tweet may be None, which means that the API explicitly returned null (e.g. deleted user)
+                        if downloaded_tweet is not None:
+                            downloaded_tweet = unwrap_tweet(downloaded_tweet)
+                            downloaded_tweet['from_api'] = True
+                            downloaded_tweet['download_with_user'] = False
+                            downloaded_tweet['download_with_alt_text'] = True
+                        add_known_tweet(known_tweets, downloaded_tweet_id, downloaded_tweet)
                     print("Download finished. Saving tweets to disk - do not kill this script until this is done!")
                     with open(tweet_dict_filename, "w") as outfile:
                         json.dump(known_tweets, outfile, indent=2)
@@ -958,6 +973,12 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> dict:
         else:
             # Don't ask again and again if the user said 'no'
             break
+
+    # TODO used for debugging, remove when tweet download is stable, or replace by shorter output 
+    # (e.g. only number of tweets, or comma separated IDs)
+    for tweet_id in initial_tweet_ids_to_download:
+        if tweet_id not in known_tweets:
+            print(f"Tweet {tweet_id} should have been downloaded, but is not in known_tweets.")
 
     # Third pass: convert tweets, using the downloaded references from pass 2
     for tweet in known_tweets.values():
