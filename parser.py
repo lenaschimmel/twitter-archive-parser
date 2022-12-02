@@ -913,20 +913,41 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> dict:
               f"Breakdown of download reasons:")
         for reason in ['quote', 'reply', 'retweet', 'media']:
             print(f" * {counts[reason]} because of {reason}")
-        print(f"There were {counts['known_reply']} references to tweets which are already known "
-              f"so we don't need to download them (not included in the numbers above).")
+        
+        tweet_ids_to_download_completely_new = []
+        tweet_ids_to_download_api_returned_null = []
+        tweet_ids_to_download_can_be_extended = []
+        
+        for tweet_id in tweet_ids_to_download:
+            known_tweet = known_tweets[tweet_id]
+            if known_tweet is None:
+                tweet_ids_to_download_completely_new.append(tweet_id)
+            elif 'api_returned_null' in known_tweet and known_tweet['api_returned_null'] == True:
+                tweet_ids_to_download_api_returned_null.append(tweet_id)
+            else:
+                tweet_ids_to_download_can_be_extended.append(tweet_id)
         print()
-        print("Please note that the downloaded tweets will not be included in the generated output yet.")
-        print("Anyway, we recommend to download the tweets now, just in case Twitter (or its API which")
-        print("we use), won't be available forever. A future version of this script will be able to")
-        print("include the downloaded tweets into the output, even if Twitter should not be available then.")
-        print()
+        print("Breakdown of availability:")
+        print(f" * {len(tweet_ids_to_download_completely_new)} completely unknown to the local cache.")
+        print(f" * {len(tweet_ids_to_download_api_returned_null)} known to be unavailable from previous runs of this script. They will no be tried again.")
+        print(f" * {len(tweet_ids_to_download_can_be_extended)} contained in the local cache, but might lack some details which could be supplemented.")
+
+        # ignore tweet_ids_to_download_api_returned_null from now on
+        # TODO there should be an override (via question, config or command line arg) to re-try those anyway
+        tweet_ids_to_download = tweet_ids_to_download_completely_new + tweet_ids_to_download_can_be_extended
 
     retried_times = 0
     max_retries = 5
 
     if len(tweet_ids_to_download) == 0:
         print("All referenced tweets are present, nothing to download.")
+    else:
+        print()
+        print("Please note that the downloaded tweets will not be included in the generated output yet.")
+        print("Anyway, we recommend to download the tweets now, just in case Twitter (or its API which")
+        print("we use), won't be available forever. A future version of this script will be able to")
+        print("include the downloaded tweets into the output, even if Twitter should not be available then.")
+        print()
 
     initial_tweet_ids_to_download = tweet_ids_to_download.copy()
 
