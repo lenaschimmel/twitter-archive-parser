@@ -1705,6 +1705,27 @@ def find_archive():
         print(f'Archive not found at {input_path}')
 
 
+def read_users_from_cache(paths: PathConfig) -> dict:
+    """
+    try to read user_id -> handle mapping from user_data_cache.json
+    """
+    # return empty dict if there is no cache file yet
+    if not os.path.exists(os.path.join(paths.dir_output_cache, 'user_data_cache.json')):
+        return {}
+
+    # else, read data from cache file
+    users_dict: dict = {}
+    user_list: list = read_json_from_js_file(os.path.join(paths.dir_output_cache, 'user_data_cache.json'))
+    print(f'reading {len(user_list)} user handles from user_data_cache.json ...')
+    if len(user_list) > 0:
+        for user_dict in user_list:
+            users_dict[user_dict['user_id']] = UserData(
+                user_id=user_dict['user_id'],
+                handle=user_dict['handle'],
+            )
+    return users_dict
+
+
 def main():
     p = ArgumentParser(
         description="Parse a Twitter archive and output in various ways"
@@ -1747,7 +1768,7 @@ def main():
 </body>
 </html>"""
 
-    users = {}
+    users = read_users_from_cache(paths)
 
     migrate_old_output(paths)
 
