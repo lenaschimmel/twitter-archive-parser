@@ -149,6 +149,8 @@ def get_config(key: str) -> Optional[str]:
         return "y"
     if key == "lookup_followers":
         return "y"
+    if key == "lookup_tweet_users":
+        return "y"
 
     print(f"Warning: config for key '{key}' not present, asking user instead.")
     # Hint: if you want the config to be "ask the user" without this warning,
@@ -230,10 +232,11 @@ def get_twitter_api_guest_token(session, bearer_token):
 
 
 # TODO if downloading fails within the for loop, we should be able to return the already 
-# fetched users, but also make it clear that it is incomplete. Maybe do it like in get_tweets.
+#  fetched users, but also make it clear that it is incomplete. Maybe do it like in get_tweets.
 def get_twitter_users(session, bearer_token, guest_token, user_ids):
     """Asks Twitter for all metadata associated with user_ids."""
     users = {}
+    failed_count = 0
     while user_ids:
         max_batch = 100
         user_id_batch = user_ids[:max_batch]
@@ -249,6 +252,9 @@ def get_twitter_users(session, bearer_token, guest_token, user_ids):
         response_json = json.loads(response.content)
         for user in response_json:
             users[user["id_str"]] = user
+        print(f'fetched {len(response_json)} users, {len(user_ids)} remaining...')
+        failed_count += (len(user_id_batch) - len(response_json))
+    print(f'{failed_count} users could not be fetched.')
     return users
 
 
@@ -294,19 +300,18 @@ def get_tweets(session, bearer_token, guest_token, tweet_ids, include_user=True,
     return tweets, remaining_tweet_ids
 
 
-def lookup_users(user_ids, users) -> dict:
-    """Fill the users dictionary with data from Twitter"""
+def lookup_users(user_ids, users, extended_user_data) -> dict:
+    """Fill the users and extended_user_data dictionaries with data from Twitter"""
     if not user_ids:
         # Don't bother opening a session if there's nothing to get
         return {}
     # Account metadata observed at ~2.1KB on average.
     estimated_size = int(2.1 * len(user_ids))
-    print(f'{len(user_ids)} users are unknown.')
+    estimated_download_time_seconds = math.ceil(len(user_ids) / 100) * 2
+    estimated_download_time_str = format_duration(estimated_download_time_seconds)
+    print(f'{len(user_ids)} users to look up, this will take up to {estimated_download_time_str} ...')
     if not get_consent(f'Download user data from Twitter (approx {estimated_size:,} KB)?', key='download_users'):
         return {}
-
-    # stores ALL the downloaded user data
-    extended_user_data: dict = {}
 
     requests = import_module('requests')
     try:
@@ -315,15 +320,23 @@ def lookup_users(user_ids, users) -> dict:
             guest_token = get_twitter_api_guest_token(session, bearer_token)
             retrieved_users = get_twitter_users(session, bearer_token, guest_token, user_ids)
             for user_id, user_info in retrieved_users.items():
-                extended_user_data[user_id] = user_info
+                if user_id not in extended_user_data.keys():
+                    extended_user_data[user_id] = user_info
+                elif extended_user_data[user_id] == user_info:
+                    pass
+                else:
+                    old_user_info = extended_user_data[user_id]
+                    try:
+                        extended_user_data[user_id] = merge_dicts(old_user_info, user_info)
+                    except Exception as err:
+                        print(f'Could not update extended user data for user id {user_id}: {err}')
+                        print('Keeping previously stored data for this user.')
             for user_id, user in retrieved_users.items():
                 if user["screen_name"] is not None:
                     users[str(user_id)] = UserData(user_id=user_id, handle=user["screen_name"])
         print()  # empty line for better readability of output
     except Exception as err:
         print(f'Failed to download user data: {err}')
-
-    return extended_user_data
 
 
 def read_json_from_js_file(filename):
@@ -436,10 +449,10 @@ def merge_dicts(a, b, path=None):
             elif isinstance(a[key], list) and isinstance(b[key], list):
                 merge_lists(a[key], b[key], ignore_types=True)
             elif a[key] == b[key]:
-                pass # same leaf value
-            elif key == 'retweet_count' or key == 'favorite_count':
+                pass  # same leaf value
+            elif key.endswith('_count'):
                 a[key] = max(parse_as_number(a[key]), parse_as_number(b[key]))
-            elif key in ['possibly_sensitive']:
+            elif key in ['possibly_sensitive', 'protected']:
                 # ignore conflicts in unimportant fields that tend to differ
                 pass
             elif parse_as_number(a[key]) == parse_as_number(b[key]):
@@ -554,7 +567,7 @@ def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets
     timestamp = int(round(datetime.datetime.strptime(timestamp_str, '%a %b %d %X %z %Y').timestamp()))
     # Example: Tue Mar 19 14:05:17 +0000 2019
     if tweet['full_text'] is None:
-        raise ValueError('full_text of tweet is empty - tweet or user has probably been withheld.')
+        raise ValueError('empty full_text - tweet or user has probably been withheld.')
     body_markdown = tweet['full_text']
     body_html = tweet['full_text']
     tweet_id_str = tweet['id_str']
@@ -861,7 +874,27 @@ def download_larger_media(media_sources: dict, paths: PathConfig):
     print(f'Wrote log to {paths.file_download_log}')
 
 
-def parse_tweets(username, users, html_template, paths: PathConfig) -> dict:
+def collect_user_ids_from_tweets(known_tweets) -> list:
+    """
+    find user ids in tweets
+    """
+    user_ids_set = set()
+    for tweet in known_tweets.values():
+        if 'in_reply_to_user_id' in tweet and tweet['in_reply_to_user_id'] is not None:
+            if int(tweet['in_reply_to_user_id']) >= 0:  # some ids are -1, not sure why
+                user_ids_set.add(str(tweet['in_reply_to_user_id']))
+        if 'entities' in tweet:
+            entities = tweet['entities']
+            if 'user_mentions' in entities and entities['user_mentions'] is not None:
+                for mention in entities['user_mentions']:
+                    if mention is not None and 'id' in mention:
+                        mentioned_id = mention['id']
+                        if int(mentioned_id) >= 0:  # some ids are -1, not sure why
+                            user_ids_set.add(str(mentioned_id))
+    return list(user_ids_set)
+
+
+def parse_tweets(username, users, html_template, paths: PathConfig) -> (dict, dict):
     """Read tweets from paths.files_input_tweets, write to *.md and *.html.
        Copy the media used to paths.dir_output_media.
        Collect user_id:user_handle mappings for later use, in 'users'.
@@ -873,11 +906,11 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> dict:
     known_tweets: dict[str, dict] = dict()
 
     # TODO If we run this tool multiple times, in `known_tweets` we will have our own tweets as
-    # well as related tweets by others. With each run, the tweet graph is expanded. We probably do
-    # not want this. To stop it, implement one of these:
-    # 1. keep own tweets and other tweets in different dicts
-    # 2. put them all in one dict, but mark the tweets by others, so that certain steps will ignore them
-    # 3. use the data that is already present in a tweet to distinguish own tweets from others
+    #  well as related tweets by others. With each run, the tweet graph is expanded. We probably do
+    #  not want this. To stop it, implement one of these:
+    #  1. keep own tweets and other tweets in different dicts
+    #  2. put them all in one dict, but mark the tweets by others, so that certain steps will ignore them
+    #  3. use the data that is already present in a tweet to distinguish own tweets from others
 
     # Load tweets that we saved in an earlier run between pass 2 and 3
     tweet_dict_filename = os.path.join(paths.dir_output_cache, 'known_tweets.json')
@@ -991,7 +1024,7 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> dict:
     print(f'Wrote {len(converted_tweets)} tweets to *.md and *.html, '
           f'with images and video embedded from {paths.dir_output_media}')
 
-    return media_sources
+    return media_sources, known_tweets
 
 
 def collect_user_ids_from_followings(paths) -> list:
@@ -1716,14 +1749,35 @@ def read_users_from_cache(paths: PathConfig) -> dict:
     # else, read data from cache file
     users_dict: dict = {}
     user_list: list = read_json_from_js_file(os.path.join(paths.dir_output_cache, 'user_data_cache.json'))
-    print(f'reading {len(user_list)} user handles from user_data_cache.json ...')
+    print(f'importing {len(user_list)} user handles from user_data_cache.json ...')
     if len(user_list) > 0:
         for user_dict in user_list:
             users_dict[user_dict['user_id']] = UserData(
                 user_id=user_dict['user_id'],
                 handle=user_dict['handle'],
             )
+    print(f'imported {len(users_dict.keys())} user handles.')
     return users_dict
+
+
+def read_extended_user_data_from_cache(paths: PathConfig) -> dict:
+    """
+    try to read extended user data from extended_user_data_cache.json
+    """
+    # return empty dict if there is no cache file yet
+    if not os.path.exists(os.path.join(paths.dir_output_cache, 'extended_user_data_cache.json')):
+        return {}
+
+    # else, read data from cache file
+    with open(os.path.join(paths.dir_output_cache, 'extended_user_data_cache.json'), 'r', encoding='utf8') as f:
+        data: list = f.readlines()
+        if len(data) <= 1:
+            return {}
+        print(f'importing extended user data from extended_user_data_cache.json ...')
+        joined_data: str = ''.join(data)
+        extended_users_dict: dict = json.loads(joined_data)
+        print(f'imported {len(extended_users_dict.keys())} sets of extended user data.')
+        return extended_users_dict
 
 
 def main():
@@ -1769,6 +1823,7 @@ def main():
 </html>"""
 
     users = read_users_from_cache(paths)
+    extended_user_data = read_extended_user_data_from_cache(paths)
 
     migrate_old_output(paths)
 
@@ -1777,8 +1832,10 @@ def main():
     if not os.path.isfile(paths.file_tweet_icon):
         shutil.copy('assets/images/favicon.ico', paths.file_tweet_icon)
 
-    media_sources = parse_tweets(username, users, html_template, paths)
+    media_sources, known_tweets_dict = parse_tweets(username, users, html_template, paths)
 
+    user_ids_from_tweets = collect_user_ids_from_tweets(known_tweets_dict)
+    print(f'found {len(user_ids_from_tweets)} user IDs in tweets.')
     following_ids = collect_user_ids_from_followings(paths)
     print(f'found {len(following_ids)} user IDs in followings.')
     follower_ids = collect_user_ids_from_followers(paths)
@@ -1817,10 +1874,20 @@ def main():
         )
 
         if not get_consent(f'Do you want to include handles of your followers '
-                           f'in the online lookup of user handles anyway?', default_to_yes=True, key='lookup_followers'):
+                           f'in the online lookup of user handles anyway?',
+                           default_to_yes=True,
+                           key='lookup_followers'
+                           ):
             collected_user_ids = collected_user_ids_without_followers
 
-    extended_user_data = lookup_users(collected_user_ids, users)
+    extended_user_ids: list = list(set(collected_user_ids).union(set(user_ids_from_tweets)))
+    print(f'found {len(extended_user_ids)} user IDs overall, including from tweets.')
+    if get_consent(f'Do you want to include users from tweets in the user data download?',
+                   key='lookup_tweet_users'
+                   ):
+        lookup_users(extended_user_ids, users, extended_user_data)
+    else:
+        lookup_users(collected_user_ids, users, extended_user_data)
 
     export_user_data(users, extended_user_data, paths)
 
