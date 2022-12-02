@@ -49,7 +49,10 @@ class UserData:
     def __init__(self, user_id: str, handle: str):
         if user_id is None:
             raise ValueError('ID "None" is not allowed in UserData.')
-        self.user_id = user_id
+        elif type(user_id) is not str:
+            self.user_id = str(user_id)
+        else:
+            self.user_id = user_id
         if handle is None:
             raise ValueError('handle "None" is not allowed in UserData.')
         self.handle = handle
@@ -315,7 +318,7 @@ def lookup_users(user_ids, users):
                 extended_user_data[user_id] = user_info
             for user_id, user in retrieved_users.items():
                 if user["screen_name"] is not None:
-                    users[user_id] = UserData(user_id=user_id, handle=user["screen_name"])
+                    users[str(user_id)] = UserData(user_id=user_id, handle=user["screen_name"])
         print()  # empty line for better readability of output
     except Exception as err:
         print(f'Failed to download user data: {err}')
