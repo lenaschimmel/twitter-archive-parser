@@ -247,7 +247,11 @@ def get_twitter_users(session, bearer_token, guest_token, user_ids):
                                headers={'authorization': f'Bearer {bearer_token}', 'x-guest-token': guest_token},
                                timeout=2,
                                )
-        if not response.status_code == 200:
+        if response.status_code == 404:
+            failed_count += len(user_id_batch)
+            print(f'requested download of {len(user_id_batch)} users returned with status "404 - Not found."')
+            continue
+        elif not response.status_code == 200:
             raise Exception(f'Failed to get user handle: {response}')
         response_json = json.loads(response.content)
         for user in response_json:
@@ -280,8 +284,14 @@ def get_tweets(session, bearer_token, guest_token, tweet_ids: list[str], include
                 query_url += "&trim_user=1"
             if include_alt_text:
                 query_url += "&include_ext_alt_text=1"
-            response = session.get(query_url,
-                                headers={'authorization': f'Bearer {bearer_token}', 'x-guest-token': guest_token}, timeout=5)
+            response = session.get(
+                query_url,
+                headers={
+                    'authorization': f'Bearer {bearer_token}',
+                    'x-guest-token': guest_token
+                },
+                timeout=5
+            )
             if response.status_code == 429:
                 # Rate limit exceeded - get a new token
                 guest_token = get_twitter_api_guest_token(session, bearer_token)
@@ -295,8 +305,8 @@ def get_tweets(session, bearer_token, guest_token, tweet_ids: list[str], include
             remaining_tweet_ids = remaining_tweet_ids[max_batch:]
     except Exception as err:
         traceback.print_exc()
-        print(f"Exception during batch download of tweets: {err}");
-        print(f"Try to work with the tweets we got so far.");
+        print(f"Exception during batch download of tweets: {err}")
+        print(f"Try to work with the tweets we got so far.")
     return tweets, remaining_tweet_ids
 
 
@@ -305,11 +315,15 @@ def lookup_users(user_ids, users, extended_user_data) -> dict:
     if not user_ids:
         # Don't bother opening a session if there's nothing to get
         return {}
+    unknown_user_ids = []
+    for user_id in user_ids:
+        if user_id not in users.keys() or user_id not in extended_user_data.keys():
+            unknown_user_ids.append(user_id)
     # Account metadata observed at ~2.1KB on average.
-    estimated_size = int(2.1 * len(user_ids))
-    estimated_download_time_seconds = math.ceil(len(user_ids) / 100) * 2
+    estimated_size = int(2.1 * len(unknown_user_ids))
+    estimated_download_time_seconds = math.ceil(len(unknown_user_ids) / 100) * 2
     estimated_download_time_str = format_duration(estimated_download_time_seconds)
-    print(f'{len(user_ids)} users to look up, this will take up to {estimated_download_time_str} ...')
+    print(f'{len(unknown_user_ids)} users to look up, this will take up to {estimated_download_time_str} ...')
     if not get_consent(f'Download user data from Twitter (approx {estimated_size:,} KB)?', key='download_users'):
         return {}
 
@@ -318,7 +332,7 @@ def lookup_users(user_ids, users, extended_user_data) -> dict:
         with requests.Session() as session:
             bearer_token = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA'
             guest_token = get_twitter_api_guest_token(session, bearer_token)
-            retrieved_users = get_twitter_users(session, bearer_token, guest_token, user_ids)
+            retrieved_users = get_twitter_users(session, bearer_token, guest_token, unknown_user_ids)
             for user_id, user_info in retrieved_users.items():
                 if user_id not in extended_user_data.keys():
                     extended_user_data[user_id] = user_info
