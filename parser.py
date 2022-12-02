@@ -996,17 +996,13 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> dict:
             # Don't ask again and again if the user said 'no'
             break
 
-    # TODO used for debugging, remove when tweet download is stable, or replace by shorter output 
-    # (e.g. only number of tweets, or comma separated IDs)
-    for tweet_id in initial_tweet_ids_to_download:
-        if tweet_id not in known_tweets:
-            print(f"Tweet {tweet_id} should have been downloaded, but is not in known_tweets.")
-
     # Third pass: convert tweets, using the downloaded references from pass 2
     for tweet in known_tweets.values():
         try:
-            converted_tweets.append(convert_tweet(tweet, username, media_sources, users, referenced_tweets, paths))
+            if 'from_archive' in tweet and tweet['from_archive'] == True:
+                converted_tweets.append(convert_tweet(tweet, username, media_sources, users, referenced_tweets, paths))
         except Exception as err:
+            traceback.print_exc()
             print(f"Could not convert tweet {tweet['id_str']} because: {err}")
     converted_tweets.sort(key=lambda tup: tup[0]) # oldest first
 
