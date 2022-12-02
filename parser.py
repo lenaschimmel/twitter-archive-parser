@@ -291,16 +291,16 @@ def get_tweets(session, bearer_token, guest_token, tweet_ids, include_user=True,
     return tweets, remaining_tweet_ids
 
 
-def lookup_users(user_ids, users):
+def lookup_users(user_ids, users) -> dict:
     """Fill the users dictionary with data from Twitter"""
     if not user_ids:
         # Don't bother opening a session if there's nothing to get
-        return
+        return {}
     # Account metadata observed at ~2.1KB on average.
     estimated_size = int(2.1 * len(user_ids))
     print(f'{len(user_ids)} users are unknown.')
     if not get_consent(f'Download user data from Twitter (approx {estimated_size:,} KB)?', key='download_users'):
-        return
+        return {}
 
     # stores ALL the downloaded user data
     extended_user_data: dict = {}
