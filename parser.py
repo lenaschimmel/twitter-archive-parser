@@ -700,15 +700,16 @@ def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets
         reply_to_id = tweet['in_reply_to_user_id']
         if int(reply_to_id) >= 0:  # some ids are -1, not sure why
             handle = tweet['in_reply_to_screen_name']
-            users[reply_to_id] = UserData(user_id=reply_to_id, handle=handle)
+            if str(reply_to_id) not in users.keys():
+                users[str(reply_to_id)] = UserData(user_id=reply_to_id, handle=handle)
     if 'entities' in tweet and 'user_mentions' in tweet['entities'] and tweet['entities']['user_mentions'] is not None:
         for mention in tweet['entities']['user_mentions']:
             if mention is not None and 'id' in mention and 'screen_name' in mention:
                 mentioned_id = mention['id']
                 if int(mentioned_id) >= 0:  # some ids are -1, not sure why
                     handle = mention['screen_name']
-                    if handle is not None:
-                        users[mentioned_id] = UserData(user_id=mentioned_id, handle=handle)
+                    if handle is not None and str(mentioned_id) not in users.keys():
+                        users[str(mentioned_id)] = UserData(user_id=mentioned_id, handle=handle)
 
     return timestamp, body_markdown, body_html
 
@@ -1679,6 +1680,7 @@ def export_user_data(users: dict, extended_user_data: dict, paths: PathConfig):
     save users dict and extended user data to JSON files
     """
     users_dicts: list[dict] = [user_data.to_dict() for user_data in users.values()]
+    users_dicts.sort(key=lambda u: int(u['user_id']))
     users_json: str = json.dumps(users_dicts, indent=2)
     with open(os.path.join(paths.dir_output_cache, 'user_data_cache.json'), 'w') as users_file:
         print(f'saving {len(users_dicts)} sets of user data to user_data_cache.json ...')
@@ -1724,6 +1726,27 @@ def find_archive():
         print(f'Archive not found at {input_path}')
 
 
+def read_users_from_cache(paths: PathConfig) -> dict:
+    """
+    try to read user_id -> handle mapping from user_data_cache.json
+    """
+    # return empty dict if there is no cache file yet
+    if not os.path.exists(os.path.join(paths.dir_output_cache, 'user_data_cache.json')):
+        return {}
+
+    # else, read data from cache file
+    users_dict: dict = {}
+    user_list: list = read_json_from_js_file(os.path.join(paths.dir_output_cache, 'user_data_cache.json'))
+    print(f'reading {len(user_list)} user handles from user_data_cache.json ...')
+    if len(user_list) > 0:
+        for user_dict in user_list:
+            users_dict[user_dict['user_id']] = UserData(
+                user_id=user_dict['user_id'],
+                handle=user_dict['handle'],
+            )
+    return users_dict
+
+
 def main():
     p = ArgumentParser(
         description="Parse a Twitter archive and output in various ways"
@@ -1732,7 +1755,6 @@ def main():
                    help="path to the twitter archive folder")
     args = p.parse_args()
 
-   
     # use input folder from cli args if given
     if args.archive_folder and os.path.isdir(args.archive_folder):
         input_folder = args.archive_folder
@@ -1741,7 +1763,7 @@ def main():
         
     paths = PathConfig(dir_archive=input_folder)
 
-    print (f"\n\nWorking on archive: {os.path.abspath(paths.dir_archive)}")
+    print(f"\n\nWorking on archive: {os.path.abspath(paths.dir_archive)}")
     paths = PathConfig(dir_archive=input_folder)
 
     # Extract the archive owner's username from data/account.js
@@ -1767,7 +1789,7 @@ def main():
 </body>
 </html>"""
 
-    users = {}
+    users = read_users_from_cache(paths)
 
     migrate_old_output(paths)
 
@@ -1843,7 +1865,7 @@ def main():
 
             download_larger_media(media_sources, paths)
             print('In case you set your account to public before initiating the download, '
-                'do not forget to protect it again.')
+                  'do not forget to protect it again.')
 
 
 if __name__ == "__main__":
