@@ -693,15 +693,16 @@ def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets
         reply_to_id = tweet['in_reply_to_user_id']
         if int(reply_to_id) >= 0:  # some ids are -1, not sure why
             handle = tweet['in_reply_to_screen_name']
-            users[reply_to_id] = UserData(user_id=reply_to_id, handle=handle)
+            if str(reply_to_id) not in users.keys():
+                users[str(reply_to_id)] = UserData(user_id=reply_to_id, handle=handle)
     if 'entities' in tweet and 'user_mentions' in tweet['entities'] and tweet['entities']['user_mentions'] is not None:
         for mention in tweet['entities']['user_mentions']:
             if mention is not None and 'id' in mention and 'screen_name' in mention:
                 mentioned_id = mention['id']
                 if int(mentioned_id) >= 0:  # some ids are -1, not sure why
                     handle = mention['screen_name']
-                    if handle is not None:
-                        users[mentioned_id] = UserData(user_id=mentioned_id, handle=handle)
+                    if handle is not None and str(mentioned_id) not in users.keys():
+                        users[str(mentioned_id)] = UserData(user_id=mentioned_id, handle=handle)
 
     return timestamp, body_markdown, body_html
 
@@ -1711,7 +1712,6 @@ def main():
                    help="path to the twitter archive folder")
     args = p.parse_args()
 
-   
     # use input folder from cli args if given
     if args.archive_folder and os.path.isdir(args.archive_folder):
         input_folder = args.archive_folder
@@ -1720,7 +1720,7 @@ def main():
         
     paths = PathConfig(dir_archive=input_folder)
 
-    print (f"\n\nWorking on archive: {os.path.abspath(paths.dir_archive)}")
+    print(f"\n\nWorking on archive: {os.path.abspath(paths.dir_archive)}")
     paths = PathConfig(dir_archive=input_folder)
 
     # Extract the archive owner's username from data/account.js
@@ -1822,7 +1822,7 @@ def main():
 
             download_larger_media(media_sources, paths)
             print('In case you set your account to public before initiating the download, '
-                'do not forget to protect it again.')
+                  'do not forget to protect it again.')
 
 
 if __name__ == "__main__":
