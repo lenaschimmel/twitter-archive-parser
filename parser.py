@@ -1659,6 +1659,7 @@ def export_user_data(users: dict, extended_user_data: dict, paths: PathConfig):
     save users dict and extended user data to JSON files
     """
     users_dicts: list[dict] = [user_data.to_dict() for user_data in users.values()]
+    users_dicts.sort(key=lambda u: int(u['user_id']))
     users_json: str = json.dumps(users_dicts, indent=2)
     with open(os.path.join(paths.dir_output_cache, 'user_data_cache.json'), 'w') as users_file:
         print(f'saving {len(users_dicts)} sets of user data to user_data_cache.json ...')
