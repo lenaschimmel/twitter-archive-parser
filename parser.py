@@ -151,6 +151,8 @@ def get_config(key: str) -> Optional[str]:
         return "y"
     if key == "lookup_tweet_users":
         return "y"
+    if key == "download_profile_images":
+        return None
 
     print(f"Warning: config for key '{key}' not present, asking user instead.")
     # Hint: if you want the config to be "ask the user" without this warning,
@@ -780,7 +782,10 @@ def download_file_if_larger(url, filename, index, count, sleep_time):
         time.sleep(sleep_time)
     # Request the URL (in stream mode so that we can conditionally abort depending on the headers)
     print(f'{pref}Requesting headers for {url}...', end='\r')
-    byte_size_before = os.path.getsize(filename)
+    if os.path.exists(filename):
+        byte_size_before = os.path.getsize(filename)
+    else:
+        byte_size_before = 0
     try:
         with requests.get(url, stream=True, timeout=2) as res:
             if not res.status_code == 200:
@@ -797,37 +802,42 @@ def download_file_if_larger(url, filename, index, count, sleep_time):
                 with open(tmp_filename,'wb') as f:
                     shutil.copyfileobj(res.raw, f)
                 post = f'{byte_size_after/2**20:.1f}MB downloaded'
-                width_before, height_before = imagesize.get(filename)
-                width_after, height_after = imagesize.get(tmp_filename)
-                pixels_before, pixels_after = width_before * height_before, width_after * height_after
-                pixels_percentage_increase = 100.0 * (pixels_after - pixels_before) / pixels_before
 
-                if width_before == -1 and height_before == -1 and width_after == -1 and height_after == -1:
-                    # could not check size of both versions, probably a video or unsupported image format
-                    os.replace(tmp_filename, filename)
-                    bytes_percentage_increase = 100.0 * (byte_size_after - byte_size_before) / byte_size_before
-                    logging.info(f'{pref}SUCCESS. New version is {bytes_percentage_increase:3.0f}% '
-                                 f'larger in bytes (pixel comparison not possible). {post}')
-                    return True, byte_size_after
-                elif width_before == -1 or height_before == -1 or width_after == -1 or height_after == -1:
-                    # could not check size of one version, this should not happen (corrupted download?)
-                    logging.info(f'{pref}SKIPPED. Pixel size comparison inconclusive: '
-                                 f'{width_before}*{height_before}px vs. {width_after}*{height_after}px. {post}')
-                    return False, byte_size_after
-                elif pixels_after >= pixels_before:
-                    os.replace(tmp_filename, filename)
-                    bytes_percentage_increase = 100.0 * (byte_size_after - byte_size_before) / byte_size_before
-                    if bytes_percentage_increase >= 0:
-                        logging.info(f'{pref}SUCCESS. New version is {bytes_percentage_increase:3.0f}% larger in bytes '
-                                     f'and {pixels_percentage_increase:3.0f}% larger in pixels. {post}')
+                if byte_size_before > 0:
+                    width_before, height_before = imagesize.get(filename)
+                    width_after, height_after = imagesize.get(tmp_filename)
+                    pixels_before, pixels_after = width_before * height_before, width_after * height_after
+                    pixels_percentage_increase = 100.0 * (pixels_after - pixels_before) / pixels_before
+
+                    if width_before == -1 and height_before == -1 and width_after == -1 and height_after == -1:
+                        # could not check size of both versions, probably a video or unsupported image format
+                        os.replace(tmp_filename, filename)
+                        bytes_percentage_increase = 100.0 * (byte_size_after - byte_size_before) / byte_size_before
+                        logging.info(f'{pref}SUCCESS. New version is {bytes_percentage_increase:3.0f}% '
+                                    f'larger in bytes (pixel comparison not possible). {post}')
+                        return True, byte_size_after
+                    elif width_before == -1 or height_before == -1 or width_after == -1 or height_after == -1:
+                        # could not check size of one version, this should not happen (corrupted download?)
+                        logging.info(f'{pref}SKIPPED. Pixel size comparison inconclusive: '
+                                    f'{width_before}*{height_before}px vs. {width_after}*{height_after}px. {post}')
+                        return False, byte_size_after
+                    elif pixels_after >= pixels_before:
+                        os.replace(tmp_filename, filename)
+                        bytes_percentage_increase = 100.0 * (byte_size_after - byte_size_before) / byte_size_before
+                        if bytes_percentage_increase >= 0:
+                            logging.info(f'{pref}SUCCESS. New version is {bytes_percentage_increase:3.0f}% larger in bytes '
+                                        f'and {pixels_percentage_increase:3.0f}% larger in pixels. {post}')
+                        else:
+                            logging.info(f'{pref}SUCCESS. New version is actually {-bytes_percentage_increase:3.0f}% '
+                                        f'smaller in bytes but {pixels_percentage_increase:3.0f}% '
+                                        f'larger in pixels. {post}')
+                        return True, byte_size_after
                     else:
-                        logging.info(f'{pref}SUCCESS. New version is actually {-bytes_percentage_increase:3.0f}% '
-                                     f'smaller in bytes but {pixels_percentage_increase:3.0f}% '
-                                     f'larger in pixels. {post}')
-                    return True, byte_size_after
-                else:
-                    logging.info(f'{pref}SKIPPED. Online version has {-pixels_percentage_increase:3.0f}% '
-                                 f'smaller pixel size. {post}')
+                        logging.info(f'{pref}SKIPPED. Online version has {-pixels_percentage_increase:3.0f}% '
+                                    f'smaller pixel size. {post}')
+                        return True, byte_size_after
+                else: # File did not exist before
+                    os.replace(tmp_filename, filename)
                     return True, byte_size_after
             else:
                 logging.info(f'{pref}SKIPPED. Online version is same byte size, assuming same content. Not downloaded.')
@@ -838,7 +848,7 @@ def download_file_if_larger(url, filename, index, count, sleep_time):
 
 
 def download_larger_media(media_sources: dict, paths: PathConfig):
-    """Uses (filename, URL) tuples in media_sources to download files from remote storage.
+    """Uses (filename, URL) items in media_sources to download files from remote storage.
        Aborts downloads if the remote file is the same size or smaller than the existing local version.
        Retries the failed downloads several times, with increasing pauses between each to avoid being blocked.
     """
@@ -1833,6 +1843,33 @@ def read_extended_user_data_from_cache(paths: PathConfig) -> dict:
         return extended_users_dict
 
 
+def download_user_images(extended_user_data: dict[str, dict], paths: PathConfig) -> None:
+     # Change suffix to choose another image size:
+        # URL suffix  -> image width and height
+        # _normal.ext -> 48
+        # _x96.ext    -> 96
+        # .ext        -> original or 400 ?
+    size_suffix = "_x96"
+
+    to_download: dict[str, str] = {}
+    for user in extended_user_data.values():
+        profile_image_url_https = user['profile_image_url_https'].replace("_normal", size_suffix)
+        file_extension = os.path.splitext(profile_image_url_https)[1]
+        profile_image_file_name = user["id_str"] + file_extension
+        profile_image_file_path = os.path.join(paths.dir_output_media, "profile-images", profile_image_file_name)
+        if not os.path.exists(profile_image_file_path):
+            mkdirs_for_file(profile_image_file_path)
+            to_download[profile_image_file_path] = profile_image_url_https
+
+    estimated_download_time_str = format_duration(len(to_download) * 0.53)
+    estimated_download_size_str = int(len(to_download) * 4.3)
+
+    if len(to_download) > 0:
+        if get_consent(f'OK to start downloading {len(to_download)} user profile images (approx {estimated_download_size_str:,} KB)? '
+                    f'This will take at least {estimated_download_time_str}.', key='download_profile_images'):
+            download_larger_media(to_download, paths)
+
+
 def main():
     p = ArgumentParser(
         description="Parse a Twitter archive and output in various ways"
@@ -1950,6 +1987,8 @@ def main():
         lookup_users(collected_user_ids, users, extended_user_data)
 
     export_user_data(users, extended_user_data, paths)
+
+    download_user_images(extended_user_data, paths)
 
     parse_followings(users, user_id_url_template, paths)
     parse_followers(users, user_id_url_template, paths)
