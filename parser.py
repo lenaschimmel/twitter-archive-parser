@@ -1039,7 +1039,7 @@ def download_tweets(known_tweets: dict[str, dict], tweet_ids_to_download: Union[
             break
 
 
-def convert_tweets(username: str, users: dict, html_template: str, known_tweets: dict[str, dict], paths: PathConfig) -> Tuple[dict, dict]:
+def convert_tweets(username: str, users: dict, html_template: str, known_tweets: dict[str, dict], paths: PathConfig) -> dict:
     """Third pass: convert tweets, using the downloaded references from pass 2"""
     converted_tweets = []
     media_sources = {}
@@ -1077,7 +1077,7 @@ def convert_tweets(username: str, users: dict, html_template: str, known_tweets:
     print(f'Wrote {len(converted_tweets)} tweets to *.md and *.html, '
           f'with images and video embedded from {paths.dir_output_media}')
 
-    return media_sources, known_tweets
+    return media_sources
 
 
 def collect_user_ids_from_followings(paths) -> list:
@@ -1893,9 +1893,8 @@ def main():
     tweets = load_tweets(paths)
     tweet_ids_to_download = collect_tweet_ids_from_tweets(tweets)
     download_tweets(tweets, tweet_ids_to_download, paths)
-    media_sources, known_tweets_dict = convert_tweets(username, users, html_template, tweets, paths)
 
-    user_ids_from_tweets = collect_user_ids_from_tweets(known_tweets_dict)
+    user_ids_from_tweets = collect_user_ids_from_tweets(tweets)
     print(f'found {len(user_ids_from_tweets)} user IDs in tweets.')
     following_ids = collect_user_ids_from_followings(paths)
     print(f'found {len(following_ids)} user IDs in followings.')
@@ -1956,6 +1955,12 @@ def main():
     parse_followers(users, user_id_url_template, paths)
     parse_direct_messages(username, users, user_id_url_template, paths)
     parse_group_direct_messages(username, users, user_id_url_template, paths)
+
+    # TODO This should be split up, so that downloaded media can be used during convert:
+    # media_sources = collect_media_sources_from_tweets(tweets, paths)
+    # # download media_sources
+    # convert_tweets(username, users, html_template, tweets, paths)
+    media_sources = convert_tweets(username, users, html_template, tweets, paths)
 
     # Download larger images, if the user agrees
     if len(media_sources) > 0:
