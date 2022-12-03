@@ -20,7 +20,7 @@
 from argparse import ArgumentParser
 from collections import defaultdict
 import math
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 from urllib.parse import urlparse
 import datetime
 import glob
@@ -518,7 +518,7 @@ def add_known_tweet(known_tweets, tweet_id, new_tweet):
             known_tweets[tweet_id] = { 'id': tweet_id, 'id_str': tweet_id, 'api_returned_null': True }
 
 
-def collect_tweet_references(tweet, known_tweets, counts):
+def collect_tweet_references(tweet, known_tweets):
     tweet = unwrap_tweet(tweet)
     tweet_ids = set()
 
@@ -535,36 +535,28 @@ def collect_tweet_references(tweet, known_tweets, counts):
                 if (matches):
                     #user_handle = matches[1]
                     quoted_id = matches[2]
-                    if (quoted_id in known_tweets):
-                        counts['known_quote'] += 1
-                    else:
+                    if quoted_id not in known_tweets:
                         tweet_ids.add(quoted_id)
-                        counts['quote'] += 1
 
     # Collect previous tweet in conversation
     if has_path(tweet, ['in_reply_to_status_id_str']):
         prev_tweet_id = tweet['in_reply_to_status_id_str']
-        if (prev_tweet_id in known_tweets):
-            counts['known_reply'] += 1
-        else:
+        if prev_tweet_id not in known_tweets:
             tweet_ids.add(prev_tweet_id)
-            counts['reply'] += 1
 
     # Collect retweets (adds the tweet itself)
     # Don't do this if we already re-downloaded this tweet
     if not 'from_api' in tweet and 'full_text' in tweet and tweet['full_text'].startswith('RT @'):
         tweet_ids.add(tweet['id_str'])
-        counts['retweet'] += 1
 
     # Collect tweets with media, which might lack alt text
     # TODO we might filter for media which has "type" : "photo" because there is no alt text for videos
     # Don't do this if we already re-downloaded this tweet with alt texts enabled
     if not 'download_with_alt_text' in tweet and has_path(tweet, ['entities', 'media']):
         tweet_ids.add(tweet['id_str'])
-        counts['media'] += 1
 
     if None in tweet_ids:
-        raise Exception(f"Tweet has id None: {tweet}")
+        raise Exception(f"Tweet has reference to other tweet with id None: {tweet}")
 
     return tweet_ids
 
@@ -587,9 +579,8 @@ class EmptyTweetFullTextError(ValueError):
     pass
 
 
-def convert_tweet(tweet, username, media_sources: dict, users, referenced_tweets, paths: PathConfig):
+def convert_tweet(tweet, username, media_sources: dict, users, paths: PathConfig):
     """Converts a JSON-format tweet. Returns tuple of timestamp, markdown and HTML."""
-    # TODO actually use `referenced_tweets`
     tweet = unwrap_tweet(tweet)
     timestamp_str = tweet['created_at']
     timestamp = int(round(datetime.datetime.strptime(timestamp_str, '%a %b %d %X %z %Y').timestamp()))
@@ -922,15 +913,7 @@ def collect_user_ids_from_tweets(known_tweets) -> list:
     return list(user_ids_set)
 
 
-def parse_tweets(username, users, html_template, paths: PathConfig) -> (dict, dict):
-    """Read tweets from paths.files_input_tweets, write to *.md and *.html.
-       Copy the media used to paths.dir_output_media.
-       Collect user_id:user_handle mappings for later use, in 'users'.
-       Returns the mapping from media filename to best-quality URL.
-    """
-    converted_tweets = []
-    media_sources = {}
-    counts = defaultdict(int)
+def load_tweets(paths: PathConfig) -> dict[str, dict]:
     known_tweets: dict[str, dict] = dict()
 
     # TODO If we run this tool multiple times, in `known_tweets` we will have our own tweets as
@@ -954,19 +937,21 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> (dict, di
             tweet['from_archive'] = True
             add_known_tweet(known_tweets, tweet['id_str'], tweet)
 
-    tweet_ids_to_download = set()
-    
-    # Second pass: Iterate through all those tweets
-    for tweet in known_tweets.values():
-        tweet_ids_to_download.update(collect_tweet_references(tweet, known_tweets, counts))
+    return known_tweets
 
-    # (Maybe) download referenced tweets
-    referenced_tweets = []
+
+def collect_tweet_ids_from_tweets(known_tweets: dict[str, dict]) -> set[str]:
+    """Second pass: Iterate through all those tweets"""
+    tweet_ids_to_download = set()
+    for tweet in known_tweets.values():
+        tweet_ids_to_download.update(collect_tweet_references(tweet, known_tweets))
+    return tweet_ids_to_download
+
+
+def download_tweets(known_tweets: dict[str, dict], tweet_ids_to_download: Union[list[str], set[str]], paths: PathConfig) -> None:
+    """(Maybe) download referenced tweets"""
     if len(tweet_ids_to_download) > 0:
-        print(f"Found references to {len(tweet_ids_to_download)} tweets which should be downloaded. "
-              f"Breakdown of download reasons:")
-        for reason in ['quote', 'reply', 'retweet', 'media']:
-            print(f" * {counts[reason]} because of {reason}")
+        print(f"Found references to {len(tweet_ids_to_download)} tweets which should be downloaded.")
         
         tweet_ids_to_download_completely_new = []
         tweet_ids_to_download_api_returned_null = []
@@ -1008,14 +993,11 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> (dict, di
         print("include the downloaded tweets into the output, even if Twitter should not be available then.")
         print()
 
-    initial_tweet_ids_to_download = tweet_ids_to_download.copy()
-
     while len(tweet_ids_to_download) > 0 and retried_times < max_retries:
         estimated_download_time_seconds = math.ceil(len(tweet_ids_to_download) / 100) * 2
         estimated_download_time_str = format_duration(estimated_download_time_seconds)
         if get_consent(f"OK to download {len(tweet_ids_to_download)} tweets from twitter? "
                        f"This would take about {estimated_download_time_str}.", key='download_tweets'):
-            # TODO maybe give an estimate of download size and/or time
             # TODO maybe let the user choose which of the tweets to download, by selecting a subset of those reasons
             requests = import_module('requests')
             try:
@@ -1039,6 +1021,7 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> (dict, di
                             downloaded_tweet['download_with_alt_text'] = True
                         add_known_tweet(known_tweets, downloaded_tweet_id, downloaded_tweet)
                     print("Download finished. Saving tweets to disk - do not kill this script until this is done!")
+                    tweet_dict_filename = os.path.join(paths.dir_output_cache, 'known_tweets.json')
                     with open(tweet_dict_filename, "w") as outfile:
                         json.dump(known_tweets, outfile, indent=2)
                     print(f"Saved {len(known_tweets)} tweets to '{tweet_dict_filename}'.")
@@ -1055,11 +1038,15 @@ def parse_tweets(username, users, html_template, paths: PathConfig) -> (dict, di
             # Don't ask again and again if the user said 'no'
             break
 
-    # Third pass: convert tweets, using the downloaded references from pass 2
+
+def convert_tweets(username: str, users: dict, html_template: str, known_tweets: dict[str, dict], paths: PathConfig) -> Tuple[dict, dict]:
+    """Third pass: convert tweets, using the downloaded references from pass 2"""
+    converted_tweets = []
+    media_sources = {}
     for tweet in known_tweets.values():
         try:
             if 'from_archive' in tweet and tweet['from_archive'] is True:
-                converted_tweets.append(convert_tweet(tweet, username, media_sources, users, referenced_tweets, paths))
+                converted_tweets.append(convert_tweet(tweet, username, media_sources, users, paths))
         except EmptyTweetFullTextError as err:
             print(f"Could not convert tweet {tweet['id_str']} because: {err}")
         except Exception as err:
@@ -1898,7 +1885,15 @@ def main():
     if not os.path.isfile(paths.file_tweet_icon):
         shutil.copy('assets/images/favicon.ico', paths.file_tweet_icon)
 
-    media_sources, known_tweets_dict = parse_tweets(username, users, html_template, paths)
+
+    # Read tweets from paths.files_input_tweets, write to *.md and *.html.
+    # Copy the media used to paths.dir_output_media.
+    # Collect user_id:user_handle mappings for later use, in 'users'.
+    # Returns the mapping from media filename to best-quality URL.
+    tweets = load_tweets(paths)
+    tweet_ids_to_download = collect_tweet_ids_from_tweets(tweets)
+    download_tweets(tweets, tweet_ids_to_download, paths)
+    media_sources, known_tweets_dict = convert_tweets(username, users, html_template, tweets, paths)
 
     user_ids_from_tweets = collect_user_ids_from_tweets(known_tweets_dict)
     print(f'found {len(user_ids_from_tweets)} user IDs in tweets.')
