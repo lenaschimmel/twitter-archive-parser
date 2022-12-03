@@ -1853,13 +1853,14 @@ def download_user_images(extended_user_data: dict[str, dict], paths: PathConfig)
 
     to_download: dict[str, str] = {}
     for user in extended_user_data.values():
-        profile_image_url_https = user['profile_image_url_https'].replace("_normal", size_suffix)
-        file_extension = os.path.splitext(profile_image_url_https)[1]
-        profile_image_file_name = user["id_str"] + file_extension
-        profile_image_file_path = os.path.join(paths.dir_output_media, "profile-images", profile_image_file_name)
-        if not os.path.exists(profile_image_file_path):
-            mkdirs_for_file(profile_image_file_path)
-            to_download[profile_image_file_path] = profile_image_url_https
+        if 'profile_image_url_https' in user.keys() and user['profile_image_url_https'] is not None:
+            profile_image_url_https = user['profile_image_url_https'].replace("_normal", size_suffix)
+            file_extension = os.path.splitext(profile_image_url_https)[1]
+            profile_image_file_name = user["id_str"] + file_extension
+            profile_image_file_path = os.path.join(paths.dir_output_media, "profile-images", profile_image_file_name)
+            if not os.path.exists(profile_image_file_path):
+                mkdirs_for_file(profile_image_file_path)
+                to_download[profile_image_file_path] = profile_image_url_https
 
     estimated_download_time_str = format_duration(len(to_download) * 0.53)
     estimated_download_size_str = int(len(to_download) * 4.3)
