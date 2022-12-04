@@ -598,7 +598,6 @@ def convert_tweet(tweet, known_tweets: dict, user_data: UserData, media_sources:
     if has_path(tweet, ['retweeted_status']):
         # TODO retweets are not unpacked as separate tweets in known_tweets, so this will usually not work:
         # tweet = known_tweets[tweet['retweeted_status']['id_str']]
-        # TODO mark egg as retweeted, and add timestamp at which it was retweeted
         outer_tweet = tweet
         tweet = tweet['retweeted_status']
     else:
@@ -684,7 +683,10 @@ def convert_tweet(tweet, known_tweets: dict, user_data: UserData, media_sources:
         for url in tweet['entities']['urls']:
             if 'url' in url and 'expanded_url' in url:
                 # TODO if expanded_url has the form of a Tweet URL, that is an embedded / quoted tweet
-
+                # we would have to retrieve the inner tweet here, and put it into egg, since the 
+                # format-specific convert functions don't have access to all tweets.
+                # Also we should probably extract a function convert_tweet_to_egg so that
+                # we can easily pass two nested eggs later.
                 egg['urls'].append({
                     'short_url': url['url'],
                     'expanded_url': url['expanded_url'],
@@ -721,10 +723,10 @@ def convert_tweet_to_html_head(
     # In the future, the five lines above can be replaced by this:
     # profile_image_file_path = user['profile_image_file_path']
 
-    # TODO link to nitter or local profile page
+    # TODO maybe link to nitter or local profile page, add config for this
     user_profile_url = f'https://twitter.com/{user["screen_name"]}'
 
-    # TODO link to nitter
+    # TODO maybe link to nitter, add config for this
     tweet_url = f'https://twitter.com/{user["screen_name"]}/status/{egg["id"]}'
 
     profile_image_rel_url = rel_url(profile_image_file_path, paths.example_file_output_tweets)
@@ -1136,13 +1138,6 @@ def collect_user_ids_from_tweets(known_tweets) -> list:
 def load_tweets(paths: PathConfig) -> dict[str, dict]:
     known_tweets: dict[str, dict] = dict()
 
-    # TODO If we run this tool multiple times, in `known_tweets` we will have our own tweets as
-    #  well as related tweets by others. With each run, the tweet graph is expanded. We probably do
-    #  not want this. To stop it, implement one of these:
-    #  1. keep own tweets and other tweets in different dicts
-    #  2. put them all in one dict, but mark the tweets by others, so that certain steps will ignore them
-    #  3. use the data that is already present in a tweet to distinguish own tweets from others
-
     # Load tweets that we saved in an earlier run between pass 2 and 3
     tweet_dict_filename = os.path.join(paths.dir_output_cache, 'known_tweets.json')
     if os.path.exists(tweet_dict_filename):
@@ -1196,7 +1191,7 @@ def download_tweets(known_tweets: dict[str, dict], tweet_ids_to_download: Union[
         print(f" * {len(tweet_ids_to_download_can_be_extended)} contained in the local cache, but might lack some "
               f"details which could be supplemented.")
 
-        # ignore tweet_ids_to_download_api_returned_null from now on
+        # ignore tweet_ids_to_download_api_returned_null from now on by using just the other lists
         # TODO there should be an override (via question, config or command line arg) to re-try those anyway
         tweet_ids_to_download = tweet_ids_to_download_completely_new + tweet_ids_to_download_can_be_extended
 
@@ -2277,7 +2272,11 @@ def main():
     parse_direct_messages(username, users, user_id_url_template, paths)
     parse_group_direct_messages(username, users, user_id_url_template, paths)
 
-    # TODO This should be split up, so that downloaded media can be used during convert:
+    # TODO Maybe this should be split up, so that downloaded media can be used during convert?
+    # On the other hand, media in own tweets will be replaces by better versions, and
+    # for media from other users' tweets, we can try to use it, since we know the local path
+    # even before it is actually downloaded.
+
     # media_sources = collect_media_sources_from_tweets(tweets, paths)
     # # download media_sources
     # convert_tweets(username, users, html_template, tweets, paths)
