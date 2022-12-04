@@ -599,21 +599,41 @@ def convert_tweet(tweet, known_tweets: dict, user_data: UserData, media_sources:
         # TODO retweets are not unpacked as separate tweets in known_tweets, so this will usually not work:
         # tweet = known_tweets[tweet['retweeted_status']['id_str']]
         # TODO mark egg as retweeted, and add timestamp at which it was retweeted
+        outer_tweet = tweet
         tweet = tweet['retweeted_status']
+    else:
+        outer_tweet = None
+
+    original_date_format = '%a %b %d %X %z %Y' # Example: Tue Mar 19 14:05:17 +0000 2019
+    nicer_date_format = '%b %d %Y, %H:%M' ## Mar 19 20019, 14:05
+
+    tweet_datetime = datetime.datetime.strptime(tweet['created_at'], original_date_format)
+    tweet_timestamp = int(round(tweet_datetime.timestamp()))
+    tweet_timestamp_str = tweet_datetime.strftime(nicer_date_format)
 
     # egg is a custom intermediate form, which contains pre-processed parts of the tweet for conversion into md and html.
     # (egg may be a strange name, but it's definitely more practical than intermediate_form.)
     egg = {
         'id': tweet['id_str'],
-        'timestamp_str': tweet['created_at'],
-        # Example: Tue Mar 19 14:05:17 +0000 2019
-        'timestamp': int(round(datetime.datetime.strptime(tweet['created_at'], '%a %b %d %X %z %Y').timestamp())),
+        'timestamp_str': tweet_timestamp_str,
+        'timestamp': tweet_timestamp,
         'urls': [],
         'media': [],
         'original_tweet_url': f"https://twitter.com/{user_data.handle}/status/{tweet['id_str']}",
         'icon_url': rel_url(paths.file_tweet_icon, paths.example_file_output_tweets),
         'user_id': user_data.user_id,
+        'outer_user_id': user_data.user_id,
     }
+
+    if outer_tweet is not None:
+        egg['is_retweeted'] = True
+        retweet_datetime = datetime.datetime.strptime(outer_tweet['created_at'], original_date_format)
+        retweet_timestamp = int(round(retweet_datetime.timestamp()))
+        retweet_timestamp_str = retweet_datetime.strftime(nicer_date_format)
+
+        egg['retweeted_timestamp_str'] = retweet_timestamp_str
+        egg['retweeted_timestamp'] = retweet_timestamp
+
 
     if has_path(tweet, ['user', 'id_str']):
         egg['user_id'] = tweet['user']['id_str']
@@ -683,29 +703,78 @@ def convert_tweet(tweet, known_tweets: dict, user_data: UserData, media_sources:
     return egg['timestamp'], md, html
 
 
+def convert_tweet_to_html_head( 
+    egg: dict,
+    extended_user_data: dict, 
+    paths: PathConfig,
+) -> str:
+
+    user = extended_user_data[egg['user_id']]
+
+    # <profile-image> <display-name> @<handle> <timestamp (only in list view)> <dropdown-menu>
+
+    size_suffix = "_x96"
+    profile_image_url_https = user['profile_image_url_https'].replace("_normal", size_suffix)
+    file_extension = os.path.splitext(profile_image_url_https)[1]
+    profile_image_file_name = user["id_str"] + file_extension
+    profile_image_file_path = os.path.join(paths.dir_output_media, "profile-images", profile_image_file_name)
+    # In the future, the five lines above can be replaced by this:
+    # profile_image_file_path = user['profile_image_file_path']
+
+    # TODO link to nitter or local profile page
+    user_profile_url = f'https://twitter.com/{user["screen_name"]}'
+
+    # TODO link to nitter
+    tweet_url = f'https://twitter.com/{user["screen_name"]}/status/{egg["id"]}'
+
+    profile_image_rel_url = rel_url(profile_image_file_path, paths.example_file_output_tweets)
+
+    # TODO the entire group profile_image + user_name + user_handle should link to a local profile
+    profile_image = f'<a class="profile-picture" href="{profile_image_rel_url}" title="Enlarge profile picture (local)"><img width="48" src="{profile_image_rel_url}" /></a>'
+    user_name = f'<span class="user-name" title="{user["description"]}">{user["name"]}</span>'
+    user_handle = f'<a class="user-handle" title="User profile and tweets (twitter.com)" href="{user_profile_url}">@{user["screen_name"]}</a>'
+    timestamp = f'<a class="tweet-timestamp" title="Tweet (twitter.com)" href="{tweet_url}">{egg["timestamp_str"]}</a>'
+    if 'retweeted_timestamp_str' in egg:
+        timestamp = f'<span class="tweet-timestamp">originally posted at <a title="Tweet (twitter.com)" href="{tweet_url}">{egg["timestamp_str"]}</a></span>'
+        retweet_timestamp = f'<span class="retweet-timestamp">retweeted at {egg["retweeted_timestamp_str"]}</spn>'
+    else:
+        retweet_timestamp = ''
+
+    return f'<div class="tweet-header">{profile_image}<div class="upper-line">{user_handle}{timestamp}</div><div class="lower-line">{user_name}{retweet_timestamp}</div></div>'
+
+
 def convert_tweet_to_html(
     egg: dict,
     extended_user_data: dict, 
     paths: PathConfig,
 ) -> str:
 
+   
     body_html = egg['full_text'].replace('\n', '<br/>\n')
 
     # if the tweet is a reply, construct a header that links the names
     # of the accounts being replied to the tweet being replied to
-    header_html = ''
+    pre_header_html = ''
 
-    if 'replying_to_url' in egg:
-        header_html += f'Replying to <a href="{egg["replying_to_url"]}">{egg["name_list"]}</a><br>'
+    if 'is_retweeted' in egg:
+        outer_user = extended_user_data[egg['outer_user_id']]
+        outer_user_name = f'<span class="user-name" title="{outer_user["description"]}">{outer_user["name"]}</span>'
+        pre_header_html += f'<div class="tweet-pre-header">Retweeted by {outer_user_name}</div>'
+    elif 'replying_to_url' in egg:
+        pre_header_html += f'<div class="tweet-pre-header">Replying to <a href="{egg["replying_to_url"]}">{egg["name_list"]}</a></div>'
 
     # replace t.co URLs with their original versions
     for url in egg['urls']:
+        display_url = url['display_url']
         expanded_url = url['expanded_url']
-        expanded_url_html = f'<a href="{expanded_url}">{expanded_url}</a>'
+        expanded_url_html = f'<a href="{expanded_url}">{display_url}</a>'
         body_html = body_html.replace(url['short_url'], expanded_url_html)
 
-    all_media_html = ""
+    # TODO add links for mentions
 
+    header_html = convert_tweet_to_html_head(egg, extended_user_data, paths)
+
+    all_media_html = ""
     # handle media: append img tags and remove image URL from text
     for media in egg['media'].values():
         original_url = media['original_url']
@@ -721,11 +790,11 @@ def convert_tweet_to_html(
         all_media_html = all_media_html + single_image_html
 
 
-    body_html = header_html + '<div class="tweet">\n' + body_html + '\n' + all_media_html + f'\n</div>' \
-                f'<a href="{egg["original_tweet_url"]}">' \
-                f'<img src="{egg["icon_url"]}" width="12" />&nbsp;{egg["timestamp_str"]}</a></p>\n'
+    full_html = pre_header_html + header_html + '<div class="tweet-body">\n' + body_html + '\n' + all_media_html + f'\n</div></p>\n'
+    #            f'<a href="{egg["original_tweet_url"]}">'
+    #                f'<img src="{egg["icon_url"]}" width="12" />&nbsp;{egg["timestamp_str"]}</a></p>\n'
 
-    return body_html
+    return full_html
 
 
 def convert_tweet_to_md(
@@ -1228,8 +1297,10 @@ def convert_tweets(user_data: UserData, extended_user_data: dict, html_template:
         html_string = '<hr>\n'.join(html for _, html in content)
         html_path = paths.create_path_for_file_output_tweets(year, month, format="html")
         with open_and_mkdirs(html_path) as f:
-            f.write(html_template.format(html_string))
-
+            f.write(html_template['begin'])
+            f.write(html_string)
+            f.write(html_template['end'])
+            
     print(f'Wrote {len(converted_tweets)} tweets to *.md and *.html, '
           f'with images and video embedded from {paths.dir_output_media}')
 
@@ -2004,6 +2075,7 @@ def download_user_images(extended_user_data: dict[str, dict], paths: PathConfig)
             file_extension = os.path.splitext(profile_image_url_https)[1]
             profile_image_file_name = user["id_str"] + file_extension
             profile_image_file_path = os.path.join(paths.dir_output_media, "profile-images", profile_image_file_name)
+            user['profile_image_local_path'] = profile_image_file_path
             if not os.path.exists(profile_image_file_path):
                 mkdirs_for_file(profile_image_file_path)
                 to_download[profile_image_file_path] = profile_image_url_https
@@ -2042,7 +2114,7 @@ def main():
 
     user_id_url_template = 'https://twitter.com/i/user/{}'
 
-    html_template = """\
+    html_template = { "begin": """\
 <!doctype html>
 <html lang="en">
 <head>
@@ -2051,14 +2123,76 @@ def main():
     <link rel="stylesheet"
           href="https://unpkg.com/@picocss/pico@latest/css/pico.min.css">
     <title>Your Twitter archive!</title>
+    <style>
+        .tweet-pre-header {
+            color: lightgrey;
+            font-size: 70%;
+            margin-bottom: 4px;
+        }
+
+        .tweet-header {
+            position: relative;
+            margin-bottom: 8px;
+            margin-left: 56px;
+        }
+
+        .upper-line {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+        }
+
+        .lower-line {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+        }
+
+        .profile-picture {
+            flex-grow: 0;
+            position: absolute;
+            left: -56px;
+        }
+
+        .profile-picture img {
+            border-radius: 50%;
+        }
+
+        .user-name {
+            font-weight: 700;
+            flex-basis: 80%;
+            margin-top: -4px;
+        }
+
+        .user-handle {
+            color: grey;
+            font-size: 70%;
+            flex-shrink: 0;
+            flex-grow: 0;
+        }
+
+       .tweet-timestamp {
+            color: grey;
+            font-size: 70%;
+            flex-shrink: 0;
+            flex-grow: 0;
+        }
+
+       .retweet-timestamp {
+            color: grey;
+            font-size: 70%;
+            flex-shrink: 0;
+            flex-grow: 0;
+        }
+    </style>
 </head>
 <body>
     <h1>Your twitter archive</h1>
-    <main class="container">
-    {}
-    </main>
+    <main class="container">""",
+"end": """    </main>
 </body>
-</html>"""
+</html>""",
+}
 
     users = read_users_from_cache(paths)
     extended_user_data = read_extended_user_data_from_cache(paths)
