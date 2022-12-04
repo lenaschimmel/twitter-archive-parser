@@ -704,20 +704,24 @@ def convert_tweet_to_html(
         expanded_url_html = f'<a href="{expanded_url}">{expanded_url}</a>'
         body_html = body_html.replace(url['short_url'], expanded_url_html)
 
-    media_html = ""
+    all_media_html = ""
 
     # handle media: append img tags and remove image URL from text
     for media in egg['media'].values():
         original_url = media['original_url']
-        best_quality_url = media['best_quality_url']
+        #best_quality_url = media['best_quality_url'] # online URL of the media, could be useful if the file does not exist locally
         local_filename = media['local_filename']
         media_url = rel_url(local_filename, paths.example_file_output_tweets)
-        image_html = f'<br/>\n<a href="{media_url}"><img width="400px" src="{media_url}" title="{media["alt_text"]}" /></a>\n'
+        if media['type'] == 'photo':
+            single_image_html = f'<br/>\n<a href="{media_url}"><img width="400px" src="{media_url}" title="{media["alt_text"]}" /></a>\n'
+        else:
+            single_image_html = f'<br/>\n<video width="400px" controls><source src="{media_url}">Your browser does not support the video tag.</video>\n'
+
         body_html = body_html.replace(original_url, '')
-        media_html = media_html + image_html
+        all_media_html = all_media_html + single_image_html
 
 
-    body_html = header_html + '<div class="tweet">\n' + body_html + '\n' + media_html + f'\n</div>' \
+    body_html = header_html + '<div class="tweet">\n' + body_html + '\n' + all_media_html + f'\n</div>' \
                 f'<a href="{egg["original_tweet_url"]}">' \
                 f'<img src="{egg["icon_url"]}" width="12" />&nbsp;{egg["timestamp_str"]}</a></p>\n'
 
@@ -745,7 +749,7 @@ def convert_tweet_to_md(
 
     # escape tweet body for markdown rendering:
     body_markdown = escape_markdown(body_markdown)
-    media_md = ""
+    all_media_md = ""
 
     # handle media: append img tags and remove image URL from text
     for media in egg['media'].values():
@@ -753,15 +757,19 @@ def convert_tweet_to_md(
         local_filename = media['local_filename']
         media_url = rel_url(local_filename, paths.example_file_output_tweets)
 
-        image_md = f'![{escape_markdown(media["alt_text"])}]({media_url})'
+        if media['type'] == 'photo':
+            single_image_md = f'\n![{escape_markdown(media["alt_text"])}]({media_url})\n'
+        else:
+            single_image_md = f'\n<video width="400px" controls><source src="{media_url}">Your browser does not support the video tag.</video>\n'
+
         body_markdown = body_markdown.replace(escape_markdown(original_url), '')
-        media_md = media_md + image_md
+        all_media_md = all_media_md + single_image_md
 
     # make the body a quote
     body_markdown = '> ' + '\n> '.join(body_markdown.splitlines())
     # append the original Twitter URL as a link
    
-    body_markdown = header_markdown + body_markdown + '\n' + media_md + f'\n\n<img src="{egg["icon_url"]}" width="12" /> ' \
+    body_markdown = header_markdown + body_markdown + '\n' + all_media_md + f'\n\n<img src="{egg["icon_url"]}" width="12" /> ' \
                                                       f'[{egg["timestamp_str"]}]({egg["original_tweet_url"]})'
     return body_markdown
 
