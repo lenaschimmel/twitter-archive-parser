@@ -152,7 +152,7 @@ def get_config(key: str) -> Optional[str]:
     if key == "lookup_tweet_users":
         return "y"
     if key == "download_profile_images":
-        return None
+        return "y"
 
     print(f"Warning: config for key '{key}' not present, asking user instead.")
     # Hint: if you want the config to be "ask the user" without this warning,
@@ -445,6 +445,9 @@ def merge_lists(a: list, b: list, ignore_types:bool=False):
                     break
                 if isinstance(item_a, dict) and isinstance(item_b, dict) and has_path(item_a, ['id_str']) and has_path(item_b, ['id_str']) and item_a['id_str'] == item_b['id_str']:
                     merge_dicts(item_a, item_b)
+                    found_in_a = True
+                    # TODO add code that merges items with same id_str in old 
+                    # lists, which were written to the cache before this was fixed
         else:
             found_in_a = item_b in a
 
@@ -565,6 +568,9 @@ def collect_tweet_references(tweet, known_tweets):
 
 def has_path(dict, index_path: List[str]):
     """Walks a path through nested dicts or lists, and returns True if all the keys are present, and all of the values are not None."""
+    if not isinstance(index_path, List):
+        raise Exception("Path must be provided as list of strings.")
+
     for index in index_path:
         if not index in dict:
             return False
@@ -581,99 +587,230 @@ class EmptyTweetFullTextError(ValueError):
     pass
 
 
-def convert_tweet(tweet, username, media_sources: dict, users, paths: PathConfig):
+def convert_tweet(tweet, known_tweets: dict, user_data: UserData, media_sources: dict, extended_user_data: dict, paths: PathConfig) -> Tuple[int, str, str]:
     """Converts a JSON-format tweet. Returns tuple of timestamp, markdown and HTML."""
     tweet = unwrap_tweet(tweet)
-    timestamp_str = tweet['created_at']
-    timestamp = int(round(datetime.datetime.strptime(timestamp_str, '%a %b %d %X %z %Y').timestamp()))
-    # Example: Tue Mar 19 14:05:17 +0000 2019
+
     if tweet['full_text'] is None:
         raise EmptyTweetFullTextError('empty full_text - tweet or user has probably been withheld.')
-    body_markdown = tweet['full_text']
-    body_html = tweet['full_text']
-    tweet_id_str = tweet['id_str']
-    # for old tweets before embedded t.co redirects were added, ensure the links are
-    # added to the urls entities list so that we can build correct links later on.
-    if 'entities' in tweet and 'media' not in tweet['entities'] and len(tweet['entities'].get("urls", [])) == 0:
-        for word in tweet['full_text'].split():
-            try:
-                url = urlparse(word)
-            except ValueError:
-                pass  # don't crash when trying to parse something that looks like a URL but actually isn't
-            else:
-                if url.scheme != '' and url.netloc != '' and not word.endswith('\u2026'):
-                    # Shorten links similar to twitter
-                    netloc_short = url.netloc[4:] if url.netloc.startswith("www.") else url.netloc
-                    path_short = url.path if len(url.path + '?' + url.query) < 15 \
-                        else (url.path + '?' + url.query)[:15] + '\u2026'
-                    tweet['entities']['urls'].append({
-                        'url': word,
-                        'expanded_url': word,
-                        'display_url': netloc_short + path_short,
-                        'indices': [tweet['full_text'].index(word), tweet['full_text'].index(word) + len(word)],
-                    })
-    # replace t.co URLs with their original versions
-    if has_path(tweet, ['entities', 'urls']):
-        for url in tweet['entities']['urls']:
-            if 'url' in url and 'expanded_url' in url:
-                expanded_url = url['expanded_url']
-                body_markdown = body_markdown.replace(url['url'], expanded_url)
-                expanded_url_html = f'<a href="{expanded_url}">{expanded_url}</a>'
-                body_html = body_html.replace(url['url'], expanded_url_html)
-    # if the tweet is a reply, construct a header that links the names
-    # of the accounts being replied to the tweet being replied to
-    header_markdown = ''
-    header_html = ''
-    if 'in_reply_to_status_id' in tweet:
+
+    # Unwrap retweets
+    if has_path(tweet, ['retweeted_status']):
+        # TODO retweets are not unpacked as separate tweets in known_tweets, so this will usually not work:
+        # tweet = known_tweets[tweet['retweeted_status']['id_str']]
+        # TODO mark egg as retweeted, and add timestamp at which it was retweeted
+        tweet = tweet['retweeted_status']
+
+    # egg is a custom intermediate form, which contains pre-processed parts of the tweet for conversion into md and html.
+    # (egg may be a strange name, but it's definitely more practical than intermediate_form.)
+    egg = {
+        'id': tweet['id_str'],
+        'timestamp_str': tweet['created_at'],
+        # Example: Tue Mar 19 14:05:17 +0000 2019
+        'timestamp': int(round(datetime.datetime.strptime(tweet['created_at'], '%a %b %d %X %z %Y').timestamp())),
+        'urls': [],
+        'media': [],
+        'original_tweet_url': f"https://twitter.com/{user_data.handle}/status/{tweet['id_str']}",
+        'icon_url': rel_url(paths.file_tweet_icon, paths.example_file_output_tweets),
+        'user_id': user_data.user_id,
+    }
+
+    if has_path(tweet, ['user', 'id_str']):
+        egg['user_id'] = tweet['user']['id_str']
+
+    # Process full_text
+    # Extract users which are replied to
+    full_text = tweet['full_text']
+    if has_path(tweet, ['in_reply_to_status_id']):
         # match and remove all occurrences of '@username ' at the start of the body
-        replying_to = re.match(r'^(@[0-9A-Za-z_]* )*', body_markdown)[0]
+        replying_to = re.match(r'^(@[0-9A-Za-z_]* )*', full_text)[0]
         if replying_to:
-            body_markdown = body_markdown[len(replying_to):]
-            body_html = body_html[len(replying_to):]
+            full_text = full_text[len(replying_to):]
         else:
             # no '@username ' in the body: we're replying to self
-            replying_to = f'@{username}'
+            replying_to = f'@{user_data.handle}'
         names = replying_to.split()
         # some old tweets lack 'in_reply_to_screen_name': use it if present, otherwise fall back to names[0]
         in_reply_to_screen_name = tweet['in_reply_to_screen_name'] if 'in_reply_to_screen_name' in tweet else names[0]
         # create a list of names of the form '@name1, @name2 and @name3' - or just '@name1' if there is only one name
-        name_list = ', '.join(names[:-1]) + (f' and {names[-1]}' if len(names) > 1 else names[0])
+        egg['name_list'] = ', '.join(names[:-1]) + (f' and {names[-1]}' if len(names) > 1 else names[0])
         in_reply_to_status_id = tweet['in_reply_to_status_id']
-        replying_to_url = f'https://twitter.com/{in_reply_to_screen_name}/status/{in_reply_to_status_id}'
-        header_markdown += f'Replying to [{escape_markdown(name_list)}]({replying_to_url})\n\n'
-        header_html += f'Replying to <a href="{replying_to_url}">{name_list}</a><br>'
+        egg['replying_to_url'] = f'https://twitter.com/{in_reply_to_screen_name}/status/{in_reply_to_status_id}'
+
+    egg['full_text'] = full_text
+    
+    # for old tweets before embedded t.co redirects were added, ensure the links are
+    # added to the urls entities list so that we can build correct links later on.
+    if 'entities' in tweet and 'media' not in tweet['entities'] and len(tweet['entities'].get("urls", [])) == 0:
+        for word in tweet['full_text'].split():
+            if "://" in word: # checking this might be quicker than trying and handling the exception
+                try:
+                    url = urlparse(word)
+                except ValueError:
+                    pass  # don't crash when trying to parse something that looks like a URL but actually isn't
+                else:
+                    if url.scheme != '' and url.netloc != '' and not word.endswith('\u2026'):
+                        # Shorten links similar to twitter
+                        netloc_short = url.netloc[4:] if url.netloc.startswith("www.") else url.netloc
+                        path_short = url.path if len(url.path + '?' + url.query) < 15 \
+                            else (url.path + '?' + url.query)[:15] + '\u2026'
+                        egg['urls'].append({
+                            'short_url': word,
+                            'expanded_url': word,
+                            'display_url': netloc_short + path_short,
+                        })
+
+    if has_path(tweet, ['entities', 'urls']):
+        for url in tweet['entities']['urls']:
+            if 'url' in url and 'expanded_url' in url:
+                # TODO if expanded_url has the form of a Tweet URL, that is an embedded / quoted tweet
+
+                egg['urls'].append({
+                    'short_url': url['url'],
+                    'expanded_url': url['expanded_url'],
+                    'display_url': url['display_url'],
+                })
+
+    egg['media'] = collect_media_ids_from_tweet(tweet, media_sources, paths)
+
+    md   = convert_tweet_to_md  (egg, extended_user_data, paths)
+    html = convert_tweet_to_html(egg, extended_user_data, paths)
+
+    # Do some other stuff that is traditionally done while converting a tweet
+    # This used to get the "simple" users dict, but we use extended_user_data now. Not sure if we still need this step at all?
+    # collect_user_connections_from_tweet(tweet, users)
+
+    return egg['timestamp'], md, html
+
+
+def convert_tweet_to_html(
+    egg: dict,
+    extended_user_data: dict, 
+    paths: PathConfig,
+) -> str:
+
+    body_html = egg['full_text'].replace('\n', '<br/>\n')
+
+    # if the tweet is a reply, construct a header that links the names
+    # of the accounts being replied to the tweet being replied to
+    header_html = ''
+
+    if 'replying_to_url' in egg:
+        header_html += f'Replying to <a href="{egg["replying_to_url"]}">{egg["name_list"]}</a><br>'
+
+    # replace t.co URLs with their original versions
+    for url in egg['urls']:
+        expanded_url = url['expanded_url']
+        expanded_url_html = f'<a href="{expanded_url}">{expanded_url}</a>'
+        body_html = body_html.replace(url['short_url'], expanded_url_html)
+
+    media_html = ""
+
+    # handle media: append img tags and remove image URL from text
+    for media in egg['media'].values():
+        original_url = media['original_url']
+        best_quality_url = media['best_quality_url']
+        local_filename = media['local_filename']
+        media_url = rel_url(local_filename, paths.example_file_output_tweets)
+        image_html = f'<br/>\n<a href="{media_url}"><img width="400px" src="{media_url}" title="{media["alt_text"]}" /></a>\n'
+        body_html = body_html.replace(original_url, '')
+        media_html = media_html + image_html
+
+
+    body_html = header_html + '<div class="tweet">\n' + body_html + '\n' + media_html + f'\n</div>' \
+                f'<a href="{egg["original_tweet_url"]}">' \
+                f'<img src="{egg["icon_url"]}" width="12" />&nbsp;{egg["timestamp_str"]}</a></p>\n'
+
+    return body_html
+
+
+def convert_tweet_to_md(
+    egg: dict,
+    extended_user_data: dict, 
+    paths: PathConfig,
+) -> str:
+
+    body_markdown = egg['full_text']
+
+    # replace t.co URLs with their original versions
+    for url in egg['urls']:
+        body_markdown = body_markdown.replace(url['short_url'], url['expanded_url'])
+
+    # if the tweet is a reply, construct a header that links the names
+    # of the accounts being replied to the tweet being replied to
+    header_markdown = ''
+    
+    if 'name_list' in egg:
+        header_markdown += f'Replying to [{escape_markdown(egg["name_list"])}]({egg["replying_to_url"]})\n\n'
+
     # escape tweet body for markdown rendering:
     body_markdown = escape_markdown(body_markdown)
-    # replace image URLs with image links to local files
+    media_md = ""
+
+    # handle media: append img tags and remove image URL from text
+    for media in egg['media'].values():
+        original_url = media['original_url']
+        local_filename = media['local_filename']
+        media_url = rel_url(local_filename, paths.example_file_output_tweets)
+
+        image_md = f'![{escape_markdown(media["alt_text"])}]({media_url})'
+        body_markdown = body_markdown.replace(escape_markdown(original_url), '')
+        media_md = media_md + image_md
+
+    # make the body a quote
+    body_markdown = '> ' + '\n> '.join(body_markdown.splitlines())
+    # append the original Twitter URL as a link
+   
+    body_markdown = header_markdown + body_markdown + '\n' + media_md + f'\n\n<img src="{egg["icon_url"]}" width="12" /> ' \
+                                                      f'[{egg["timestamp_str"]}]({egg["original_tweet_url"]})'
+    return body_markdown
+
+
+def collect_media_ids_from_tweet(tweet, media_sources: Optional[dict], paths: PathConfig) -> dict[str, dict]:
+    """
+    This function is dual-use:
+    If you pass media_sources, information about the media will be put there. You can use it to download high res media from Twitter.
+    The return value will be a list of this tweet's media, which you can use to create html or md output.
+    """
+    tweet_id_str = tweet['id_str']
+    tweet_media = {}
+
     if has_path(tweet, ['entities', 'media']) and has_path(tweet, ['extended_entities', 'media']) and \
             len(tweet['entities']['media']) > 0 and 'url' in tweet['entities']['media'][0]:
-            
+        
+        # Not sure I understand this code - if a tweet has more than 1 attached image, is the first media's 
+        # URL the only one in the full text, and represents all (up to four) images?
         original_url = tweet['entities']['media'][0]['url']
-        markdown = ''
-        html = ''
         for media in tweet['extended_entities']['media']:
             if 'url' in media and 'media_url' in media and media['media_url'] is not None:
                 original_expanded_url = media['media_url']
                 original_filename = os.path.split(original_expanded_url)[1]
                 archive_media_filename = tweet_id_str + '-' + original_filename
                 archive_media_path = os.path.join(paths.dir_input_media, archive_media_filename)
-                file_output_media = os.path.join(paths.dir_output_media, archive_media_filename)
-                media_url = rel_url(file_output_media, paths.example_file_output_tweets)
-                markdown += '' if not markdown and body_markdown == escape_markdown(original_url) else '\n\n'
-                html += '' if not html and body_html == original_url else '<br>'
-                # if file exists, this means that file is probably an image (not a video)
-                if os.path.isfile(archive_media_path):
-                    # Found a matching image, use this one
-                    if not os.path.isfile(file_output_media):
-                        shutil.copy(archive_media_path, file_output_media)
-                    markdown += f'![]({media_url})'
-                    html += f'<img src="{media_url}"/>'
+                media_id = media['id_str']
+
+                type = media['type']
+                if type == "photo":
                     # Save the online location of the best-quality version of this file, for later upgrading if wanted
                     best_quality_url = f'https://pbs.twimg.com/media/{original_filename}:orig'
-                    media_sources[os.path.join(paths.dir_output_media, archive_media_filename)] = best_quality_url
-                else:
-                    # If the file does not exists, it might be a video. Then its filename might
-                    # be found like this:
+                    file_output_media = os.path.join(paths.dir_output_media, archive_media_filename)
+                    alt_text = ''
+                    if has_path(media, ['ext_alt_text']):
+                        alt_text = media['ext_alt_text']
+
+
+                    tweet_media[media_id] = {
+                        'type': type,
+                        'original_url': original_url,
+                        'best_quality_url': best_quality_url,
+                        'local_filename': file_output_media,
+                        'alt_text': alt_text,
+                        'id': media_id,
+                    }
+                    if media_sources is not None:
+                        media_sources[file_output_media] = best_quality_url
+                elif type == "video":
+                    # For images, the filename might be found like this:
                     # Is there any other file that includes the tweet_id in its filename?
                     archive_media_paths = glob.glob(os.path.join(paths.dir_input_media, tweet_id_str + '*'))
                     if len(archive_media_paths) > 0:
@@ -683,10 +820,6 @@ def convert_tweet(tweet, username, media_sources: dict, users, paths: PathConfig
                             media_url = rel_url(file_output_media, paths.example_file_output_tweets)
                             if not os.path.isfile(file_output_media):
                                 shutil.copy(archive_media_path, file_output_media)
-                            markdown += f'<video controls><source src="{media_url}">Your browser ' \
-                                        f'does not support the video tag.</video>\n'
-                            html += f'<video controls><source src="{media_url}">Your browser ' \
-                                    f'does not support the video tag.</video>\n'
                             # Save the online location of the best-quality version of this file,
                             # for later upgrading if wanted
                             if 'video_info' in media and 'variants' in media['video_info']:
@@ -703,24 +836,25 @@ def convert_tweet(tweet, username, media_sources: dict, users, paths: PathConfig
                                           f"{archive_media_path} {media_url}")
                                     print(f"JSON: {tweet}")
                                 else:
-                                    media_sources[os.path.join(paths.dir_output_media, archive_media_filename)] = best_quality_url
+                                    if media_sources is not None:
+                                        media_sources[os.path.join(paths.dir_output_media, archive_media_filename)] = best_quality_url
+                                    tweet_media[media_id] = {
+                                        'type': type,
+                                        'original_url': original_url,
+                                        'best_quality_url': best_quality_url,
+                                        'local_filename': file_output_media,
+                                        'alt_text': '',
+                                        'id': media_id,
+                                    }
                     else:
                         print(f'Warning: missing local file: {archive_media_path}. Using original link instead: '
                               f'{original_url} (expands to {original_expanded_url})')
-                        markdown += f'![]({original_url})'
-                        html += f'<a href="{original_url}">{original_url}</a>'
-        body_markdown = body_markdown.replace(escape_markdown(original_url), markdown)
-        body_html = body_html.replace(original_url, html)
-    # make the body a quote
-    body_markdown = '> ' + '\n> '.join(body_markdown.splitlines())
-    body_html = '<p><blockquote>' + '<br>\n'.join(body_html.splitlines()) + '</blockquote>'
-    # append the original Twitter URL as a link
-    original_tweet_url = f'https://twitter.com/{username}/status/{tweet_id_str}'
-    icon_url = rel_url(paths.file_tweet_icon, paths.example_file_output_tweets) 
-    body_markdown = header_markdown + body_markdown + f'\n\n<img src="{icon_url}" width="12" /> ' \
-                                                      f'[{timestamp_str}]({original_tweet_url})'
-    body_html = header_html + body_html + f'<a href="{original_tweet_url}"><img src="{icon_url}" ' \
-                                          f'width="12" />&nbsp;{timestamp_str}</a></p>'
+                else:
+                    print(f"Unknown media type: {type}")
+    return tweet_media
+
+
+def collect_user_connections_from_tweet(tweet: dict, users: dict) -> None:
     # extract user_id:handle connections
     if 'in_reply_to_user_id' in tweet and 'in_reply_to_screen_name' in tweet and \
             tweet['in_reply_to_screen_name'] is not None:
@@ -738,7 +872,6 @@ def convert_tweet(tweet, username, media_sources: dict, users, paths: PathConfig
                     if handle is not None and str(mentioned_id) not in users.keys():
                         users[str(mentioned_id)] = UserData(user_id=mentioned_id, handle=handle)
 
-    return timestamp, body_markdown, body_html
 
 
 def find_files_input_tweets(dir_path_input_data):
@@ -1055,8 +1188,13 @@ def convert_tweets(user_data: UserData, extended_user_data: dict, html_template:
     media_sources = {}
     for tweet in known_tweets.values():
         try:
+            # known_tweets will contain tweets that do not belong directly into our output
             if 'from_archive' in tweet and tweet['from_archive'] is True:
-                converted_tweets.append(convert_tweet(tweet, username, media_sources, users, paths))
+                # Generate output for this tweet, and at the same time collect its media ids
+                converted_tweets.append(convert_tweet(tweet, known_tweets, user_data, media_sources, extended_user_data, paths))
+            else:
+                # Only collect media ids
+                collect_media_ids_from_tweet(tweet, media_sources, paths)
         except EmptyTweetFullTextError as err:
             print(f"Could not convert tweet {tweet['id_str']} because: {err}")
         except Exception as err:
@@ -2001,7 +2139,7 @@ def main():
     # media_sources = collect_media_sources_from_tweets(tweets, paths)
     # # download media_sources
     # convert_tweets(username, users, html_template, tweets, paths)
-    media_sources = convert_tweets(user_data.handle, users, html_template, tweets, paths)
+    media_sources = convert_tweets(user_data, extended_user_data, html_template, tweets, paths)
 
     # Download larger images, if the user agrees
     if len(media_sources) > 0:
