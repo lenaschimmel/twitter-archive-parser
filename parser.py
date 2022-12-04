@@ -373,10 +373,10 @@ def read_json_from_js_file(filename):
         return json.loads(data)
 
 
-def extract_username(paths: PathConfig):
+def extract_user_data(paths: PathConfig) -> UserData:
     """Returns the user's Twitter username from account.js."""
-    account = read_json_from_js_file(paths.file_account_js)
-    return account[0]['account']['username']
+    account = read_json_from_js_file(paths.file_account_js)[0]['account']
+    return UserData(account['accountId'], account['username'])
 
 
 def escape_markdown(input_text: str) -> str:
@@ -1049,7 +1049,7 @@ def download_tweets(known_tweets: dict[str, dict], tweet_ids_to_download: Union[
             break
 
 
-def convert_tweets(username: str, users: dict, html_template: str, known_tweets: dict[str, dict], paths: PathConfig) -> dict:
+def convert_tweets(user_data: UserData, extended_user_data: dict, html_template: str, known_tweets: dict[str, dict], paths: PathConfig) -> dict:
     """Third pass: convert tweets, using the downloaded references from pass 2"""
     converted_tweets = []
     media_sources = {}
@@ -1890,8 +1890,9 @@ def main():
     print(f"\n\nWorking on archive: {os.path.abspath(paths.dir_archive)}")
     paths = PathConfig(dir_archive=input_folder)
 
-    # Extract the archive owner's username from data/account.js
-    username = extract_username(paths)
+    # Extract the archive owner's identity from data/account.js
+    user_data = extract_user_data(paths)
+    username = user_data.handle
 
     user_id_url_template = 'https://twitter.com/i/user/{}'
 
@@ -2000,7 +2001,7 @@ def main():
     # media_sources = collect_media_sources_from_tweets(tweets, paths)
     # # download media_sources
     # convert_tweets(username, users, html_template, tweets, paths)
-    media_sources = convert_tweets(username, users, html_template, tweets, paths)
+    media_sources = convert_tweets(user_data.handle, users, html_template, tweets, paths)
 
     # Download larger images, if the user agrees
     if len(media_sources) > 0:
