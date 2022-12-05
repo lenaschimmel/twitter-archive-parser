@@ -863,7 +863,8 @@ def convert_tweet_to_md(
         media_url = rel_url(local_filename, paths.example_file_output_tweets)
 
         if media['type'] == 'photo':
-            single_image_md = f'\n![{escape_markdown(media["alt_text"])}]({media_url})\n'
+            alt_text = escape_markdown(media["alt_text"].replace("\n"," "))
+            single_image_md = f'\n![{alt_text}]({media_url})\n'
         else:
             single_image_md = f'\n<video width="400px" controls><source src="{media_url}">Your browser does not support the video tag.</video>\n'
 
