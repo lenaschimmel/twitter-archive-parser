@@ -587,7 +587,7 @@ class EmptyTweetFullTextError(ValueError):
     pass
 
 
-def convert_tweet(tweet, known_tweets: dict, user_data: UserData, media_sources: dict, extended_user_data: dict, paths: PathConfig) -> Tuple[int, str, str]:
+def convert_tweet(tweet, known_tweets: dict, own_user_data: UserData, media_sources: dict, extended_user_data: dict, paths: PathConfig) -> Tuple[int, str, str]:
     """Converts a JSON-format tweet. Returns tuple of timestamp, markdown and HTML."""
     tweet = unwrap_tweet(tweet)
 
@@ -618,10 +618,8 @@ def convert_tweet(tweet, known_tweets: dict, user_data: UserData, media_sources:
         'timestamp': tweet_timestamp,
         'urls': [],
         'media': [],
-        'original_tweet_url': f"https://twitter.com/{user_data.handle}/status/{tweet['id_str']}",
-        'icon_url': rel_url(paths.file_tweet_icon, paths.example_file_output_tweets),
-        'user_id': user_data.user_id,
-        'outer_user_id': user_data.user_id,
+        'original_tweet_url': f"https://twitter.com/{own_user_data.handle}/status/{tweet['id_str']}",
+        'icon_url': rel_url(paths.file_tweet_icon, paths.example_file_output_tweets)
     }
 
     if outer_tweet is not None:
@@ -636,6 +634,9 @@ def convert_tweet(tweet, known_tweets: dict, user_data: UserData, media_sources:
 
     if has_path(tweet, ['user', 'id_str']):
         egg['user_id'] = tweet['user']['id_str']
+        egg['outer_user_id'] = own_user_data.user_id
+    else:
+        egg['user_id'] = own_user_data.user_id
 
     # Process full_text
     # Extract users which are replied to
@@ -647,7 +648,7 @@ def convert_tweet(tweet, known_tweets: dict, user_data: UserData, media_sources:
             full_text = full_text[len(replying_to):]
         else:
             # no '@username ' in the body: we're replying to self
-            replying_to = f'@{user_data.handle}'
+            replying_to = f'@{own_user_data.handle}'
         names = replying_to.split()
         # some old tweets lack 'in_reply_to_screen_name': use it if present, otherwise fall back to names[0]
         in_reply_to_screen_name = tweet['in_reply_to_screen_name'] if 'in_reply_to_screen_name' in tweet else names[0]
@@ -693,10 +694,18 @@ def convert_tweet(tweet, known_tweets: dict, user_data: UserData, media_sources:
                     'display_url': url['display_url'],
                 })
 
+                matches = re.match(r'^https://twitter.com/([0-9A-Za-z_]*)/status/(\d+)$', url['expanded_url'])
+                if (matches):
+                    quoted_id = matches[2]
+                    if quoted_id in known_tweets:
+                        egg['inner_tweet'] = known_tweets[quoted_id]
+                    else:
+                        print(f'Tweet {tweet["id_str"]} quotes tweet {quoted_id} but quoted tweet is not known.')
+
     egg['media'] = collect_media_ids_from_tweet(tweet, media_sources, paths)
 
-    md   = convert_tweet_to_md  (egg, extended_user_data, paths)
-    html = convert_tweet_to_html(egg, extended_user_data, paths)
+    md   = convert_tweet_to_md  (egg, own_user_data, extended_user_data, paths)
+    html = convert_tweet_to_html(egg, own_user_data, extended_user_data, paths)
 
     # Do some other stuff that is traditionally done while converting a tweet
     # This used to get the "simple" users dict, but we use extended_user_data now. Not sure if we still need this step at all?
@@ -710,8 +719,25 @@ def convert_tweet_to_html_head(
     extended_user_data: dict, 
     paths: PathConfig,
 ) -> str:
+    """Returns the <div class="tweet-header"> with all needed contents for a tweet."""
+
+    # Fallback header in case we don't have a user_id and can't construct the tweet_url
+    timestamp = f'<span class="tweet-timestamp">{egg["timestamp_str"]}</span>'
+    if egg['user_id'] not in extended_user_data:
+        return f'<div class="tweet-header"><div class="upper-line"><span class="user-handle">unknown</span>{timestamp}</div><div class="lower-line"><span class="user-name">Unknown user></span></div></div>'
 
     user = extended_user_data[egg['user_id']]
+
+    # TODO maybe link to nitter, add config for this
+    tweet_url = f'https://twitter.com/{user["screen_name"]}/status/{egg["id"]}'
+
+
+    if 'retweeted_timestamp_str' in egg:
+        timestamp = f'<span class="tweet-timestamp">originally posted at <a title="Tweet (twitter.com)" href="{tweet_url}">{egg["timestamp_str"]}</a></span>'
+        retweet_timestamp = f'<span class="retweet-timestamp">retweeted at {egg["retweeted_timestamp_str"]}</spn>'
+    else:
+        retweet_timestamp = ''
+
 
     # <profile-image> <display-name> @<handle> <timestamp (only in list view)> <dropdown-menu>
 
@@ -726,31 +752,23 @@ def convert_tweet_to_html_head(
     # TODO maybe link to nitter or local profile page, add config for this
     user_profile_url = f'https://twitter.com/{user["screen_name"]}'
 
-    # TODO maybe link to nitter, add config for this
-    tweet_url = f'https://twitter.com/{user["screen_name"]}/status/{egg["id"]}'
-
+    timestamp = f'<a class="tweet-timestamp" title="Tweet (twitter.com)" href="{tweet_url}">{egg["timestamp_str"]}</a>'
     profile_image_rel_url = rel_url(profile_image_file_path, paths.example_file_output_tweets)
 
     # TODO the entire group profile_image + user_name + user_handle should link to a local profile
     profile_image = f'<a class="profile-picture" href="{profile_image_rel_url}" title="Enlarge profile picture (local)"><img width="48" src="{profile_image_rel_url}" /></a>'
     user_name = f'<span class="user-name" title="{user["description"]}">{user["name"]}</span>'
     user_handle = f'<a class="user-handle" title="User profile and tweets (twitter.com)" href="{user_profile_url}">@{user["screen_name"]}</a>'
-    timestamp = f'<a class="tweet-timestamp" title="Tweet (twitter.com)" href="{tweet_url}">{egg["timestamp_str"]}</a>'
-    if 'retweeted_timestamp_str' in egg:
-        timestamp = f'<span class="tweet-timestamp">originally posted at <a title="Tweet (twitter.com)" href="{tweet_url}">{egg["timestamp_str"]}</a></span>'
-        retweet_timestamp = f'<span class="retweet-timestamp">retweeted at {egg["retweeted_timestamp_str"]}</spn>'
-    else:
-        retweet_timestamp = ''
-
+    
     return f'<div class="tweet-header">{profile_image}<div class="upper-line">{user_handle}{timestamp}</div><div class="lower-line">{user_name}{retweet_timestamp}</div></div>'
 
 
 def convert_tweet_to_html(
     egg: dict,
+    own_user_data: UserData,
     extended_user_data: dict, 
     paths: PathConfig,
 ) -> str:
-
    
     body_html = egg['full_text'].replace('\n', '<br/>\n')
 
@@ -791,16 +809,32 @@ def convert_tweet_to_html(
         body_html = body_html.replace(original_url, '')
         all_media_html = all_media_html + single_image_html
 
+    # Convert inner tweet. We need the tweet author's user data, which may be (partially) unknown.
+    if has_path(egg, ['inner_tweet']):
+        inner_tweet = egg['inner_tweet']
+        if has_path(inner_tweet, ['user', 'id_str']):
+            inner_user_id = inner_tweet['user']['id_str']
+            if has_path(extended_user_data, [inner_user_id]):
+                inner_user = extended_user_data[inner_user_id]
+                inner_user_data = UserData(inner_user_id, inner_user['screen_name'])
+            else:
+                inner_user_data = UserData(inner_user_id, 'unknown user')
+        else:
+            inner_user_data = own_user_data
+        _, _, inner_tweet_html = convert_tweet(inner_tweet, None, inner_user_data, None, extended_user_data, paths)
+        all_media_html += f'<div class="quote-tweet">{inner_tweet_html}</div>'
 
-    full_html = pre_header_html + header_html + '<div class="tweet-body">\n' + body_html + '\n' + all_media_html + f'\n</div></p>\n'
+
+    full_html = pre_header_html + header_html + '<div class="tweet-body">\n' + body_html + '\n' + all_media_html + f'\n</div>\n'
     #            f'<a href="{egg["original_tweet_url"]}">'
-    #                f'<img src="{egg["icon_url"]}" width="12" />&nbsp;{egg["timestamp_str"]}</a></p>\n'
+    #                f'<img src="{egg["icon_url"]}" width="12" />&nbsp;{egg["timestamp_str"]}</a>\n'
 
     return full_html
 
 
 def convert_tweet_to_md(
     egg: dict,
+    own_user_data: UserData,
     extended_user_data: dict, 
     paths: PathConfig,
 ) -> str:
@@ -1121,6 +1155,8 @@ def collect_user_ids_from_tweets(known_tweets) -> list:
     """
     user_ids_set = set()
     for tweet in known_tweets.values():
+        if has_path(tweet, ['user','id_str']):
+            user_ids_set.add(tweet['user']['id_str'])
         if 'in_reply_to_user_id' in tweet and tweet['in_reply_to_user_id'] is not None:
             if int(tweet['in_reply_to_user_id']) >= 0:  # some ids are -1, not sure why
                 user_ids_set.add(str(tweet['in_reply_to_user_id']))
@@ -2178,6 +2214,13 @@ def main():
             font-size: 70%;
             flex-shrink: 0;
             flex-grow: 0;
+        }
+
+        .quote-tweet {
+            margin-top: 12px;
+            border: 1px solid var(--muted-border-color);
+            border-radius: 12px;
+            padding: 24px;
         }
     </style>
 </head>
