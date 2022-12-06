@@ -97,21 +97,25 @@ class PathConfig:
         # structured like an actual tweet output file, can be used to compute relative urls to a media file
         self.example_file_output_tweets = self.create_path_for_file_output_tweets(year=2020, month=12)
 
-    def create_path_for_file_output_tweets(self, year, month, format="html", kind="tweets") -> str:
+    def create_path_for_file_output_tweets(self, year, month, output_format: str = "html", kind: str = "tweets") -> str:
         """Builds the path for a tweet-archive file based on some properties."""
         # Previously the filename was f'{dt.year}-{dt.month:02}-01-Tweet-Archive-{dt.year}-{dt.month:02}'
-        return os.path.join(self.dir_output, f"{kind}-{format}", f"{year:04}", f"{year:04}-{month:02}-01-{kind}.{format}")
+        return os.path.join(
+            self.dir_output, f"{kind}-{output_format}", f"{year:04}", f"{year:04}-{month:02}-01-{kind}.{output_format}"
+        )
 
-    def create_path_for_file_output_dms(self, name: str, index: Optional[int]=None, format: str="html", kind: str="DMs") -> str:
+    def create_path_for_file_output_dms(
+            self, name: str, index: Optional[int] = None, output_format: str = "html", kind: str = "DMs"
+    ) -> str:
         """Builds the path for a dm-archive file based on some properties."""
         index_suffix = ""
-        if (index):
+        if index:
             index_suffix = f"-part{index:03}"
-        return os.path.join(self.dir_output, kind, f"{kind}-{name}{index_suffix}.{format}")
+        return os.path.join(self.dir_output, kind, f"{kind}-{name}{index_suffix}.{output_format}")
 
-    def create_path_for_file_output_single(self, format: str, kind: str)->str:
+    def create_path_for_file_output_single(self, output_format: str, kind: str) -> str:
         """Builds the path for a single output file which, i.e. one that is not part of a larger group or sequence."""
-        return os.path.join(self.dir_output, f"{kind}.{format}")
+        return os.path.join(self.dir_output, f"{kind}.{output_format}")
 
 
 def format_duration(seconds: float) -> str:
@@ -180,15 +184,15 @@ def get_consent(prompt: str, key: str, default_to_yes: bool = False):
             user_input = config_val
             print(f"Skipped question: '{prompt}', used config '{config_val}'.")
         if user_input == "":
-            print (f"Your empty response was assumed to mean '{default_answer}' (the default for this question).")
+            print(f"Your empty response was assumed to mean '{default_answer}' (the default for this question).")
             return default_to_yes
         if user_input.lower() in ('y', 'yes'):
             return True
         if user_input.lower() in ('n', 'no'):
             return False
-        print (f"Sorry, did not understand. Please answer with y, n, yes, no, or press enter to accept "
-            f"the default (which is '{default_answer}' in this case, as indicated by the uppercase "
-            f"'{default_answer.upper()[0]}'.)")
+        print(f"Sorry, did not understand. Please answer with y, n, yes, no, or press enter to accept "
+              f"the default (which is '{default_answer}' in this case, as indicated by the uppercase "
+              f"'{default_answer.upper()[0]}'.)")
 
 
 def import_module(module):
@@ -264,7 +268,14 @@ def get_twitter_users(session, bearer_token, guest_token, user_ids):
     return users
 
 
-def get_tweets(session, bearer_token, guest_token, tweet_ids: list[str], include_user=True, include_alt_text=True) -> Tuple[dict[str, Optional[dict]], list[str]]:
+def get_tweets(
+        session,
+        bearer_token,
+        guest_token,
+        tweet_ids: list[str],
+        include_user=True,
+        include_alt_text=True
+) -> Tuple[dict[str, Optional[dict]], list[str]]:
     """Get the json metadata for multiple tweets.
     If include_user is False, you will only get a numerical id for the user.
     Requested tweets may be unavailable for two reasons:
@@ -281,7 +292,8 @@ def get_tweets(session, bearer_token, guest_token, tweet_ids: list[str], include
             tweet_id_batch = remaining_tweet_ids[:max_batch]
             tweet_id_list = ",".join(map(str,tweet_id_batch))
             print(f"Download {len(tweet_id_batch)} tweets of {len(remaining_tweet_ids)} remaining...")
-            query_url = f"https://api.twitter.com/1.1/statuses/lookup.json?id={tweet_id_list}&tweet_mode=extended&map=true"
+            query_url = f"https://api.twitter.com/1.1/statuses/lookup.json?id={tweet_id_list}&" \
+                        f"tweet_mode=extended&map=true"
             if not include_user:
                 query_url += "&trim_user=1"
             if include_alt_text:
@@ -332,7 +344,8 @@ def lookup_users(user_ids, users, extended_user_data) -> dict:
     requests = import_module('requests')
     try:
         with requests.Session() as session:
-            bearer_token = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA'
+            bearer_token = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xn' \
+                           'Zz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA'
             guest_token = get_twitter_api_guest_token(session, bearer_token)
             retrieved_users = get_twitter_users(session, bearer_token, guest_token, unknown_user_ids)
             for user_id, user_info in retrieved_users.items():
@@ -368,7 +381,7 @@ def read_json_from_js_file(filename):
         prefix = '['
         if '{' in data[0]:
             prefix += ' {'
-        data =  prefix + ''.join(data[1:])
+        data = prefix + ''.join(data[1:])
         # parse the resulting JSON and return as a dict
         return json.loads(data)
 
@@ -412,7 +425,10 @@ def parse_as_number(str_or_number):
 
 
 def equal_ignore_types(a, b):
-    """Recognizes two things as equal even if one is a str and the other is a number (but with identical content), or if both are lists or both are dicts, and all of their nested values are equal_ignore_types"""
+    """
+    Recognizes two things as equal even if one is a str and the other is a number (but with identical content),
+    or if both are lists or both are dicts, and all of their nested values are equal_ignore_types
+    """
     if a == b:
         return True
     if parse_as_number(a) is not None and parse_as_number(b) is not None: 
@@ -434,8 +450,14 @@ def equal_ignore_types(a, b):
     return False
 
 
-def merge_lists(a: list, b: list, ignore_types:bool=False):
-    """Adds all items from b to a which are not already in a. If you pass ignore_types=True, it uses equal_ignore_types internally, and also recognizes two list items as equal if they both are dicts with equal id_str values in it, which results in merging the dicts instead of adding both separately to the result. Modifies a and returns a."""
+def merge_lists(a: list, b: list, ignore_types: bool = False):
+    """
+    Adds all items from b to a which are not already in a.
+    If you pass ignore_types=True, it uses equal_ignore_types internally,
+    and also recognizes two list items as equal if they both are dicts with equal id_str values in it,
+    which results in merging the dicts instead of adding both separately to the result.
+    Modifies a and returns a.
+    """
     for item_b in b:
         found_in_a = False
         if ignore_types:
@@ -443,11 +465,12 @@ def merge_lists(a: list, b: list, ignore_types:bool=False):
                 if equal_ignore_types(item_a, item_b):
                     found_in_a = True
                     break
-                if isinstance(item_a, dict) and isinstance(item_b, dict) and has_path(item_a, ['id_str']) and has_path(item_b, ['id_str']) and item_a['id_str'] == item_b['id_str']:
+                if isinstance(item_a, dict) and isinstance(item_b, dict) and has_path(item_a, ['id_str']) \
+                        and has_path(item_b, ['id_str']) and item_a['id_str'] == item_b['id_str']:
                     merge_dicts(item_a, item_b)
                     found_in_a = True
                     # TODO add code that merges items with same id_str in old 
-                    # lists, which were written to the cache before this was fixed
+                    #  lists, which were written to the cache before this was fixed
         else:
             found_in_a = item_b in a
 
@@ -459,8 +482,9 @@ def merge_lists(a: list, b: list, ignore_types:bool=False):
 # Taken from https://stackoverflow.com/a/7205107/39946, then adapted to
 # some commonly observed twitter specifics.
 def merge_dicts(a, b, path=None):
-    "merges b into a"
-    if path is None: path = []
+    """merges b into a"""
+    if path is None:
+        path = []
     for key in b:
         if key in a:
             if isinstance(a[key], dict) and isinstance(b[key], dict):
@@ -515,7 +539,7 @@ def add_known_tweet(known_tweets, tweet_id, new_tweet):
                     print(f"Tweet {tweet_id} could not be merged: {err}")
         else:
             known_tweets[tweet_id] = new_tweet
-    else: # new_tweet is None
+    else:  # new_tweet is None
         # Mark tweet as unavailable via the API
         if tweet_id in known_tweets:
             known_tweets[tweet_id]['api_returned_null'] = True
@@ -537,8 +561,8 @@ def collect_tweet_references(tweet, known_tweets):
             if 'url' in url and 'expanded_url' in url:
                 expanded_url = url['expanded_url']
                 matches = re.match(r'^https://twitter.com/([0-9A-Za-z_]*)/status/(\d+)$', expanded_url)
-                if (matches):
-                    #user_handle = matches[1]
+                if matches is not None:
+                    # user_handle = matches[1]
                     quoted_id = matches[2]
                     if quoted_id not in known_tweets:
                         tweet_ids.add(quoted_id)
@@ -566,16 +590,17 @@ def collect_tweet_references(tweet, known_tweets):
     return tweet_ids
 
 
-def has_path(dict, index_path: List[str]):
-    """Walks a path through nested dicts or lists, and returns True if all the keys are present, and all of the values are not None."""
+def has_path(root_dict: dict, index_path: List[str]):
+    """Walks a path through nested dicts or lists,
+    returns True if all the keys are present, and all of the values are not None."""
     if not isinstance(index_path, List):
         raise Exception("Path must be provided as list of strings.")
 
     for index in index_path:
-        if not index in dict:
+        if index not in root_dict:
             return False
-        dict = dict[index]
-        if dict is None:
+        root_dict = root_dict[index]
+        if root_dict is None:
             return False
     return True
 
@@ -587,11 +612,18 @@ class EmptyTweetFullTextError(ValueError):
     pass
 
 
-def convert_tweet(tweet, known_tweets: dict, own_user_data: UserData, media_sources: dict, extended_user_data: dict, paths: PathConfig) -> Tuple[int, str, str]:
+def convert_tweet(
+        tweet: dict,
+        known_tweets: Optional[dict],
+        own_user_data: UserData,
+        media_sources: Optional[dict],
+        extended_user_data: dict,
+        paths: PathConfig,
+) -> Tuple[int, str, str]:
     """Converts a JSON-format tweet. Returns tuple of timestamp, markdown and HTML."""
     tweet = unwrap_tweet(tweet)
 
-    if tweet['full_text'] is None:
+    if 'full_text' not in tweet or tweet['full_text'] is None:
         raise EmptyTweetFullTextError('empty full_text - tweet or user has probably been withheld.')
 
     # Unwrap retweets
@@ -603,21 +635,22 @@ def convert_tweet(tweet, known_tweets: dict, own_user_data: UserData, media_sour
     else:
         outer_tweet = None
 
-    original_date_format = '%a %b %d %X %z %Y' # Example: Tue Mar 19 14:05:17 +0000 2019
-    nicer_date_format = '%b %d %Y, %H:%M' ## Mar 19 20019, 14:05
+    original_date_format = '%a %b %d %X %z %Y'  # Example: Tue Mar 19 14:05:17 +0000 2019
+    nicer_date_format = '%b %d %Y, %H:%M'  # Mar 19 20019, 14:05
 
     tweet_datetime = datetime.datetime.strptime(tweet['created_at'], original_date_format)
     tweet_timestamp = int(round(tweet_datetime.timestamp()))
     tweet_timestamp_str = tweet_datetime.strftime(nicer_date_format)
 
-    # egg is a custom intermediate form, which contains pre-processed parts of the tweet for conversion into md and html.
+    # egg is a custom intermediate form, which contains pre-processed parts of the tweet
+    # for conversion into md and html.
     # (egg may be a strange name, but it's definitely more practical than intermediate_form.)
     egg = {
         'id': tweet['id_str'],
         'timestamp_str': tweet_timestamp_str,
         'timestamp': tweet_timestamp,
         'urls': [],
-        'media': [],
+        'media': {},
         'original_tweet_url': f"https://twitter.com/{own_user_data.handle}/status/{tweet['id_str']}",
         'icon_url': rel_url(paths.file_tweet_icon, paths.example_file_output_tweets)
     }
@@ -630,7 +663,6 @@ def convert_tweet(tweet, known_tweets: dict, own_user_data: UserData, media_sour
 
         egg['retweeted_timestamp_str'] = retweet_timestamp_str
         egg['retweeted_timestamp'] = retweet_timestamp
-
 
     if has_path(tweet, ['user', 'id_str']):
         egg['user_id'] = tweet['user']['id_str']
@@ -663,7 +695,8 @@ def convert_tweet(tweet, known_tweets: dict, own_user_data: UserData, media_sour
     # added to the urls entities list so that we can build correct links later on.
     if 'entities' in tweet and 'media' not in tweet['entities'] and len(tweet['entities'].get("urls", [])) == 0:
         for word in tweet['full_text'].split():
-            if "://" in word: # checking this might be quicker than trying and handling the exception
+            # TODO: what about URLs without '://' ?
+            if "://" in word:  # checking this might be quicker than trying and handling the exception
                 try:
                     url = urlparse(word)
                 except ValueError:
@@ -684,10 +717,10 @@ def convert_tweet(tweet, known_tweets: dict, own_user_data: UserData, media_sour
         for url in tweet['entities']['urls']:
             if 'url' in url and 'expanded_url' in url:
                 # TODO if expanded_url has the form of a Tweet URL, that is an embedded / quoted tweet
-                # we would have to retrieve the inner tweet here, and put it into egg, since the 
-                # format-specific convert functions don't have access to all tweets.
-                # Also we should probably extract a function convert_tweet_to_egg so that
-                # we can easily pass two nested eggs later.
+                #  we would have to retrieve the inner tweet here, and put it into egg, since the
+                #  format-specific convert functions don't have access to all tweets.
+                #  Also we should probably extract a function convert_tweet_to_egg so that
+                #  we can easily pass two nested eggs later.
                 egg['urls'].append({
                     'short_url': url['url'],
                     'expanded_url': url['expanded_url'],
@@ -695,20 +728,22 @@ def convert_tweet(tweet, known_tweets: dict, own_user_data: UserData, media_sour
                 })
 
                 matches = re.match(r'^https://twitter.com/([0-9A-Za-z_]*)/status/(\d+)$', url['expanded_url'])
-                if (matches):
+                if matches:
                     quoted_id = matches[2]
-                    if quoted_id in known_tweets:
+                    if known_tweets is not None and quoted_id in known_tweets:
                         egg['inner_tweet'] = known_tweets[quoted_id]
                     else:
                         print(f'Tweet {tweet["id_str"]} quotes tweet {quoted_id} but quoted tweet is not known.')
 
-    egg['media'] = collect_media_ids_from_tweet(tweet, media_sources, paths)
+    if media_sources is not None:
+        egg['media'] = collect_media_ids_from_tweet(tweet, media_sources, paths)
 
-    md   = convert_tweet_to_md  (egg, own_user_data, extended_user_data, paths)
+    md = convert_tweet_to_md(egg, own_user_data, extended_user_data, paths)
     html = convert_tweet_to_html(egg, own_user_data, extended_user_data, paths)
 
     # Do some other stuff that is traditionally done while converting a tweet
-    # This used to get the "simple" users dict, but we use extended_user_data now. Not sure if we still need this step at all?
+    # This used to get the "simple" users dict, but we use extended_user_data now.
+    # Not sure if we still need this step at all?
     # collect_user_connections_from_tweet(tweet, users)
 
     return egg['timestamp'], md, html
@@ -724,23 +759,24 @@ def convert_tweet_to_html_head(
     # Fallback header in case we don't have a user_id and can't construct the tweet_url
     timestamp = f'<span class="tweet-timestamp">{egg["timestamp_str"]}</span>'
     if egg['user_id'] not in extended_user_data:
-        return f'<div class="tweet-header"><div class="upper-line"><span class="user-handle">unknown</span>{timestamp}</div><div class="lower-line"><span class="user-name">Unknown user></span></div></div>'
+        return f'<div class="tweet-header"><div class="upper-line"><span class="user-handle">unknown</span>' \
+               f'{timestamp}</div><div class="lower-line"><span class="user-name">Unknown user></span></div></div>'
 
     user = extended_user_data[egg['user_id']]
 
     # TODO maybe link to nitter, add config for this
     tweet_url = f'https://twitter.com/{user["screen_name"]}/status/{egg["id"]}'
 
-
     if 'retweeted_timestamp_str' in egg:
-        timestamp = f'<span class="tweet-timestamp">originally posted at <a title="Tweet (twitter.com)" href="{tweet_url}">{egg["timestamp_str"]}</a></span>'
+        timestamp = f'<span class="tweet-timestamp">originally posted at <a title="Tweet (twitter.com)" ' \
+                    f'href="{tweet_url}">{egg["timestamp_str"]}</a></span>'
         retweet_timestamp = f'<span class="retweet-timestamp">retweeted at {egg["retweeted_timestamp_str"]}</spn>'
     else:
+        timestamp = f'<a class="tweet-timestamp" title="Tweet (twitter.com)" ' \
+                    f'href="{tweet_url}">{egg["timestamp_str"]}</a>'
         retweet_timestamp = ''
 
-
-    # <profile-image> <display-name> @<handle> <timestamp (only in list view)> <dropdown-menu>
-
+    # build profile image output:
     size_suffix = "_x96"
     profile_image_url_https = user['profile_image_url_https'].replace("_normal", size_suffix)
     file_extension = os.path.splitext(profile_image_url_https)[1]
@@ -758,9 +794,11 @@ def convert_tweet_to_html_head(
     # TODO the entire group profile_image + user_name + user_handle should link to a local profile
     profile_image = f'<a class="profile-picture" href="{profile_image_rel_url}" title="Enlarge profile picture (local)"><img width="48" src="{profile_image_rel_url}" /></a>'
     user_name = f'<span class="user-name" title="{user["description"]}">{user["name"]}</span>'
-    user_handle = f'<a class="user-handle" title="User profile and tweets (twitter.com)" href="{user_profile_url}">@{user["screen_name"]}</a>'
+    user_handle = f'<a class="user-handle" title="User profile and tweets (twitter.com)" ' \
+                  f'href="{user_profile_url}">@{user["screen_name"]}</a>'
     
-    return f'<div class="tweet-header">{profile_image}<div class="upper-line">{user_handle}{timestamp}</div><div class="lower-line">{user_name}{retweet_timestamp}</div></div>'
+    return f'<div class="tweet-header">{profile_image}<div class="upper-line">{user_handle}{timestamp}</div>' \
+           f'<div class="lower-line">{user_name}{retweet_timestamp}</div></div>'
 
 
 def convert_tweet_to_html(
@@ -781,7 +819,8 @@ def convert_tweet_to_html(
         outer_user_name = f'<span class="user-name" title="{outer_user["description"]}">{outer_user["name"]}</span>'
         pre_header_html += f'<div class="tweet-pre-header">Retweeted by {outer_user_name}</div>'
     elif 'replying_to_url' in egg:
-        pre_header_html += f'<div class="tweet-pre-header">Replying to <a href="{egg["replying_to_url"]}">{egg["name_list"]}</a></div>'
+        pre_header_html += f'<div class="tweet-pre-header">Replying to <a href="{egg["replying_to_url"]}">' \
+                           f'{egg["name_list"]}</a></div>'
 
     # replace t.co URLs with their original versions
     for url in egg['urls']:
@@ -798,13 +837,16 @@ def convert_tweet_to_html(
     # handle media: append img tags and remove image URL from text
     for media in egg['media'].values():
         original_url = media['original_url']
-        #best_quality_url = media['best_quality_url'] # online URL of the media, could be useful if the file does not exist locally
+        # best_quality_url = media['best_quality_url'] # online URL of the media,
+        # could be useful if the file does not exist locally
         local_filename = media['local_filename']
         media_url = rel_url(local_filename, paths.example_file_output_tweets)
         if media['type'] == 'photo':
-            single_image_html = f'<br/>\n<a href="{media_url}"><img width="400px" src="{media_url}" title="{media["alt_text"]}" /></a>\n'
+            single_image_html = f'<br/>\n<a href="{media_url}"><img width="400px" src="{media_url}" ' \
+                                f'title="{media["alt_text"]}" /></a>\n'
         else:
-            single_image_html = f'<br/>\n<video width="400px" controls><source src="{media_url}">Your browser does not support the video tag.</video>\n'
+            single_image_html = f'<br/>\n<video width="400px" controls><source src="{media_url}">' \
+                                f'Your browser does not support the video tag.</video>\n'
 
         body_html = body_html.replace(original_url, '')
         all_media_html = all_media_html + single_image_html
@@ -824,10 +866,11 @@ def convert_tweet_to_html(
         _, _, inner_tweet_html = convert_tweet(inner_tweet, None, inner_user_data, None, extended_user_data, paths)
         all_media_html += f'<div class="quote-tweet">{inner_tweet_html}</div>'
 
-
-    full_html = pre_header_html + header_html + '<div class="tweet-body">\n' + body_html + '\n' + all_media_html + f'\n</div>\n'
-    #            f'<a href="{egg["original_tweet_url"]}">'
-    #                f'<img src="{egg["icon_url"]}" width="12" />&nbsp;{egg["timestamp_str"]}</a>\n'
+    full_html = pre_header_html + header_html + '<div class="tweet-body">\n' + body_html + '\n' + \
+        all_media_html + f'\n</div>\n'
+    # Twitter icon, probably obsolete now that the tweet link is in the timestamp:
+    # f'<a href="{egg["original_tweet_url"]}">'
+    # f'<img src="{egg["icon_url"]}" width="12" />&nbsp;{egg["timestamp_str"]}</a>\n'
 
     return full_html
 
@@ -863,10 +906,11 @@ def convert_tweet_to_md(
         media_url = rel_url(local_filename, paths.example_file_output_tweets)
 
         if media['type'] == 'photo':
-            alt_text = escape_markdown(media["alt_text"].replace("\n"," "))
+            alt_text = escape_markdown(media["alt_text"].replace("\n", " "))
             single_image_md = f'\n![{alt_text}]({media_url})\n'
         else:
-            single_image_md = f'\n<video width="400px" controls><source src="{media_url}">Your browser does not support the video tag.</video>\n'
+            single_image_md = f'\n<video width="400px" controls><source src="{media_url}">' \
+                              f'Your browser does not support the video tag.</video>\n'
 
         body_markdown = body_markdown.replace(escape_markdown(original_url), '')
         all_media_md = all_media_md + single_image_md
@@ -875,15 +919,16 @@ def convert_tweet_to_md(
     body_markdown = '> ' + '\n> '.join(body_markdown.splitlines())
     # append the original Twitter URL as a link
    
-    body_markdown = header_markdown + body_markdown + '\n' + all_media_md + f'\n\n<img src="{egg["icon_url"]}" width="12" /> ' \
-                                                      f'[{egg["timestamp_str"]}]({egg["original_tweet_url"]})'
+    body_markdown = header_markdown + body_markdown + '\n' + all_media_md + \
+        f'\n\n<img src="{egg["icon_url"]}" width="12" /> [{egg["timestamp_str"]}]({egg["original_tweet_url"]})'
     return body_markdown
 
 
 def collect_media_ids_from_tweet(tweet, media_sources: Optional[dict], paths: PathConfig) -> dict[str, dict]:
     """
     This function is dual-use:
-    If you pass media_sources, information about the media will be put there. You can use it to download high res media from Twitter.
+    If you pass media_sources, information about the media will be put there.
+    You can use it to download high-res media from Twitter.
     The return value will be a list of this tweet's media, which you can use to create html or md output.
     """
     tweet_id_str = tweet['id_str']
@@ -903,8 +948,8 @@ def collect_media_ids_from_tweet(tweet, media_sources: Optional[dict], paths: Pa
                 archive_media_path = os.path.join(paths.dir_input_media, archive_media_filename)
                 media_id = media['id_str']
 
-                type = media['type']
-                if type == "photo":
+                media_type = media['type']
+                if media_type == "photo":
                     # Save the online location of the best-quality version of this file, for later upgrading if wanted
                     best_quality_url = f'https://pbs.twimg.com/media/{original_filename}:orig'
                     file_output_media = os.path.join(paths.dir_output_media, archive_media_filename)
@@ -912,9 +957,8 @@ def collect_media_ids_from_tweet(tweet, media_sources: Optional[dict], paths: Pa
                     if has_path(media, ['ext_alt_text']):
                         alt_text = media['ext_alt_text']
 
-
                     tweet_media[media_id] = {
-                        'type': type,
+                        'type': media_type,
                         'original_url': original_url,
                         'best_quality_url': best_quality_url,
                         'local_filename': file_output_media,
@@ -923,7 +967,7 @@ def collect_media_ids_from_tweet(tweet, media_sources: Optional[dict], paths: Pa
                     }
                     if media_sources is not None:
                         media_sources[file_output_media] = best_quality_url
-                elif type == "video":
+                elif media_type == "video":
                     # For images, the filename might be found like this:
                     # Is there any other file that includes the tweet_id in its filename?
                     archive_media_paths = glob.glob(os.path.join(paths.dir_input_media, tweet_id_str + '*'))
@@ -938,7 +982,7 @@ def collect_media_ids_from_tweet(tweet, media_sources: Optional[dict], paths: Pa
                             # for later upgrading if wanted
                             if 'video_info' in media and 'variants' in media['video_info']:
                                 best_quality_url = ''
-                                best_bitrate = -1 # some valid videos are marked with bitrate=0 in the JSON
+                                best_bitrate = -1  # some valid videos are marked with bitrate=0 in the JSON
                                 for variant in media['video_info']['variants']:
                                     if 'bitrate' in variant:
                                         bitrate = int(variant['bitrate'])
@@ -951,9 +995,10 @@ def collect_media_ids_from_tweet(tweet, media_sources: Optional[dict], paths: Pa
                                     print(f"JSON: {tweet}")
                                 else:
                                     if media_sources is not None:
-                                        media_sources[os.path.join(paths.dir_output_media, archive_media_filename)] = best_quality_url
+                                        media_sources[os.path.join(paths.dir_output_media, archive_media_filename)] = \
+                                            best_quality_url
                                     tweet_media[media_id] = {
-                                        'type': type,
+                                        'type': media_type,
                                         'original_url': original_url,
                                         'best_quality_url': best_quality_url,
                                         'local_filename': file_output_media,
@@ -964,7 +1009,8 @@ def collect_media_ids_from_tweet(tweet, media_sources: Optional[dict], paths: Pa
                         print(f'Warning: missing local file: {archive_media_path}. Using original link instead: '
                               f'{original_url} (expands to {original_expanded_url})')
                 else:
-                    print(f"Unknown media type: {type}")
+                    print(f"Unknown media type: {media_type}")
+                    # TODO: something with media type "animated_gif"
     return tweet_media
 
 
@@ -985,7 +1031,6 @@ def collect_user_connections_from_tweet(tweet: dict, users: dict) -> None:
                     handle = mention['screen_name']
                     if handle is not None and str(mentioned_id) not in users.keys():
                         users[str(mentioned_id)] = UserData(user_id=mentioned_id, handle=handle)
-
 
 
 def find_files_input_tweets(dir_path_input_data):
@@ -1023,7 +1068,7 @@ def download_file_if_larger(url, filename, index, count, sleep_time):
     imagesize = import_module('imagesize')
 
     pref = f'{index:3d}/{count:3d} {filename}: '
-    # Sleep briefly, in an attempt to minimize the possibility of trigging some auto-cutoff mechanism
+    # Sleep briefly, in an attempt to minimize the possibility of triggering some auto-cutoff mechanism
     if index > 1:
         print(f'{pref}Sleeping...', end='\r')
         time.sleep(sleep_time)
@@ -1046,7 +1091,7 @@ def download_file_if_larger(url, filename, index, count, sleep_time):
                 # Proceed with the full download
                 tmp_filename = filename+'.tmp'
                 print(f'{pref}Downloading {url}...            ', end='\r')
-                with open(tmp_filename,'wb') as f:
+                with open(tmp_filename, 'wb') as f:
                     shutil.copyfileobj(res.raw, f)
                 post = f'{byte_size_after/2**20:.1f}MB downloaded'
 
@@ -1061,29 +1106,30 @@ def download_file_if_larger(url, filename, index, count, sleep_time):
                         os.replace(tmp_filename, filename)
                         bytes_percentage_increase = 100.0 * (byte_size_after - byte_size_before) / byte_size_before
                         logging.info(f'{pref}SUCCESS. New version is {bytes_percentage_increase:3.0f}% '
-                                    f'larger in bytes (pixel comparison not possible). {post}')
+                                     f'larger in bytes (pixel comparison not possible). {post}')
                         return True, byte_size_after
                     elif width_before == -1 or height_before == -1 or width_after == -1 or height_after == -1:
                         # could not check size of one version, this should not happen (corrupted download?)
                         logging.info(f'{pref}SKIPPED. Pixel size comparison inconclusive: '
-                                    f'{width_before}*{height_before}px vs. {width_after}*{height_after}px. {post}')
+                                     f'{width_before}*{height_before}px vs. {width_after}*{height_after}px. {post}')
                         return False, byte_size_after
                     elif pixels_after >= pixels_before:
                         os.replace(tmp_filename, filename)
                         bytes_percentage_increase = 100.0 * (byte_size_after - byte_size_before) / byte_size_before
                         if bytes_percentage_increase >= 0:
-                            logging.info(f'{pref}SUCCESS. New version is {bytes_percentage_increase:3.0f}% larger in bytes '
-                                        f'and {pixels_percentage_increase:3.0f}% larger in pixels. {post}')
+                            logging.info(f'{pref}SUCCESS. New version is {bytes_percentage_increase:3.0f}% '
+                                         f'larger in bytes and {pixels_percentage_increase:3.0f}% '
+                                         f'larger in pixels. {post}')
                         else:
                             logging.info(f'{pref}SUCCESS. New version is actually {-bytes_percentage_increase:3.0f}% '
-                                        f'smaller in bytes but {pixels_percentage_increase:3.0f}% '
-                                        f'larger in pixels. {post}')
+                                         f'smaller in bytes but {pixels_percentage_increase:3.0f}% '
+                                         f'larger in pixels. {post}')
                         return True, byte_size_after
                     else:
                         logging.info(f'{pref}SKIPPED. Online version has {-pixels_percentage_increase:3.0f}% '
-                                    f'smaller pixel size. {post}')
+                                     f'smaller pixel size. {post}')
                         return True, byte_size_after
-                else: # File did not exist before
+                else:  # File did not exist before
                     os.replace(tmp_filename, filename)
                     return True, byte_size_after
             else:
@@ -1096,7 +1142,7 @@ def download_file_if_larger(url, filename, index, count, sleep_time):
 
 def download_larger_media(media_sources: dict, paths: PathConfig):
     """Uses (filename, URL) items in media_sources to download files from remote storage.
-       Aborts downloads if the remote file is the same size or smaller than the existing local version.
+       Aborts download if the remote file is the same size or smaller than the existing local version.
        Retries the failed downloads several times, with increasing pauses between each to avoid being blocked.
     """
     # Log to file as well as the console
@@ -1115,7 +1161,9 @@ def download_larger_media(media_sources: dict, paths: PathConfig):
         success_count = 0
         retries = {}
         for index, (local_media_path, media_url) in enumerate(media_sources.items()):
-            success, bytes_downloaded = download_file_if_larger(media_url, local_media_path, index + 1, number_of_files, sleep_time)
+            success, bytes_downloaded = download_file_if_larger(
+                media_url, local_media_path, index + 1, number_of_files, sleep_time
+            )
             if success:
                 success_count += 1
             else:
@@ -1126,7 +1174,9 @@ def download_larger_media(media_sources: dict, paths: PathConfig):
             time_elapsed: float = time.time() - start_time
             estimated_time_per_file: float = time_elapsed / (index + 1)
 
-            time_remaining_string = format_duration(seconds = (number_of_files - (index + 1)) * estimated_time_per_file)
+            time_remaining_string = format_duration(
+                seconds=(number_of_files - (index + 1)) * estimated_time_per_file
+            )
 
             if index + 1 == number_of_files:
                 print('    100 % done.')
@@ -1156,7 +1206,7 @@ def collect_user_ids_from_tweets(known_tweets) -> list:
     """
     user_ids_set = set()
     for tweet in known_tweets.values():
-        if has_path(tweet, ['user','id_str']):
+        if has_path(tweet, ['user', 'id_str']):
             user_ids_set.add(tweet['user']['id_str'])
         if 'in_reply_to_user_id' in tweet and tweet['in_reply_to_user_id'] is not None:
             if int(tweet['in_reply_to_user_id']) >= 0:  # some ids are -1, not sure why
@@ -1200,7 +1250,11 @@ def collect_tweet_ids_from_tweets(known_tweets: dict[str, dict]) -> set[str]:
     return tweet_ids_to_download
 
 
-def download_tweets(known_tweets: dict[str, dict], tweet_ids_to_download: Union[list[str], set[str]], paths: PathConfig) -> None:
+def download_tweets(
+        known_tweets: dict[str, dict],
+        tweet_ids_to_download: Union[list[str], set[str]],
+        paths: PathConfig
+) -> None:
     """(Maybe) download referenced tweets"""
     if len(tweet_ids_to_download) > 0:
         print(f"Found references to {len(tweet_ids_to_download)} tweets which should be downloaded.")
@@ -1265,7 +1319,8 @@ def download_tweets(known_tweets: dict[str, dict], tweet_ids_to_download: Union[
 
                     for downloaded_tweet_id in downloaded_tweets:
                         downloaded_tweet = downloaded_tweets[downloaded_tweet_id]
-                        # downloaded_tweet may be None, which means that the API explicitly returned null (e.g. deleted user)
+                        # downloaded_tweet may be None,
+                        # which means that the API explicitly returned null (e.g. deleted user)
                         if downloaded_tweet is not None:
                             downloaded_tweet = unwrap_tweet(downloaded_tweet)
                             downloaded_tweet['from_api'] = True
@@ -1291,7 +1346,13 @@ def download_tweets(known_tweets: dict[str, dict], tweet_ids_to_download: Union[
             break
 
 
-def convert_tweets(user_data: UserData, extended_user_data: dict, html_template: str, known_tweets: dict[str, dict], paths: PathConfig) -> dict:
+def convert_tweets(
+        user_data: UserData,
+        extended_user_data: dict,
+        html_template: dict,
+        known_tweets: dict[str, dict],
+        paths: PathConfig
+) -> dict:
     """Third pass: convert tweets, using the downloaded references from pass 2"""
     converted_tweets = []
     media_sources = {}
@@ -1309,7 +1370,7 @@ def convert_tweets(user_data: UserData, extended_user_data: dict, html_template:
         except Exception as err:
             traceback.print_exc()
             print(f"Could not convert tweet {tweet['id_str']} because: {err}")
-    converted_tweets.sort(key=lambda tup: tup[0]) # oldest first
+    converted_tweets.sort(key=lambda tup: tup[0])  # oldest first
 
     # Group tweets by month
     grouped_tweets = defaultdict(list)
@@ -1321,13 +1382,13 @@ def convert_tweets(user_data: UserData, extended_user_data: dict, html_template:
     for (year, month), content in grouped_tweets.items():
         # Write into *.md files
         md_string = '\n\n----\n\n'.join(md for md, _ in content)
-        md_path = paths.create_path_for_file_output_tweets(year, month, format="md")
+        md_path = paths.create_path_for_file_output_tweets(year, month, output_format="md")
         with open_and_mkdirs(md_path) as f:
             f.write(md_string)
 
         # Write into *.html files
         html_string = '<hr>\n'.join(html for _, html in content)
-        html_path = paths.create_path_for_file_output_tweets(year, month, format="html")
+        html_path = paths.create_path_for_file_output_tweets(year, month, output_format="html")
         with open_and_mkdirs(html_path) as f:
             f.write(html_template['begin'])
             f.write(html_string)
@@ -1367,7 +1428,7 @@ def parse_followings(users, user_id_url_template, paths: PathConfig):
         handle = users[following_id].handle if following_id in users else '~unknown~handle~'
         following.append(handle + ' ' + user_id_url_template.format(following_id))
     following.sort()
-    following_output_path = paths.create_path_for_file_output_single(format="txt", kind="following")
+    following_output_path = paths.create_path_for_file_output_single(output_format="txt", kind="following")
     with open_and_mkdirs(following_output_path) as f:
         f.write('\n'.join(following))
     print(f"Wrote {len(following)} accounts to {following_output_path}")
@@ -1401,7 +1462,7 @@ def parse_followers(users, user_id_url_template, paths: PathConfig):
         handle = users[follower_id].handle if follower_id in users else '~unknown~handle~'
         followers.append(handle + ' ' + user_id_url_template.format(follower_id))
     followers.sort()
-    followers_output_path = paths.create_path_for_file_output_single(format="txt", kind="followers")
+    followers_output_path = paths.create_path_for_file_output_single(output_format="txt", kind="followers")
     with open_and_mkdirs(followers_output_path) as f:
         f.write('\n'.join(followers))
     print(f"Wrote {len(followers)} accounts to {followers_output_path}")
@@ -1567,7 +1628,9 @@ def parse_direct_messages(username, users, user_id_url_template, paths: PathConf
                 markdown += f'### Conversation between {escaped_username} and {other_user_name}, ' \
                             f'part {chunk_index+1}: ###\n\n----\n\n'
                 markdown += '\n\n----\n\n'.join(md for _, md in chunk)
-                conversation_output_path = paths.create_path_for_file_output_dms(name=other_user_short_name, index=(chunk_index + 1), format="md")
+                conversation_output_path = paths.create_path_for_file_output_dms(
+                    name=other_user_short_name, index=(chunk_index + 1), output_format="md"
+                )
 
                 # write part to a markdown file
                 with open_and_mkdirs(conversation_output_path) as f:
@@ -1579,7 +1642,9 @@ def parse_direct_messages(username, users, user_id_url_template, paths: PathConf
             markdown = ''
             markdown += f'### Conversation between {escaped_username} and {other_user_name}: ###\n\n----\n\n'
             markdown += '\n\n----\n\n'.join(md for _, md in messages)
-            conversation_output_path = paths.create_path_for_file_output_dms(name=other_user_short_name, format="md")
+            conversation_output_path = paths.create_path_for_file_output_dms(
+                name=other_user_short_name, output_format="md"
+            )
 
             with open_and_mkdirs(conversation_output_path) as f:
                 f.write(markdown)
@@ -1777,7 +1842,8 @@ def parse_group_direct_messages(username, users, user_id_url_template, paths):
                         conversation_name_update = message['conversationNameUpdate']
                         if all(tag in conversation_name_update for tag in ['initiatingUserId', 'name', 'createdAt']):
                             from_id = conversation_name_update['initiatingUserId']
-                            body_markdown = f"_changed group name to: {escape_markdown(conversation_name_update['name'])}_"
+                            body_markdown = f"_changed group name to: " \
+                                            f"{escape_markdown(conversation_name_update['name'])}_"
                             created_at = conversation_name_update['createdAt']  # example: 2022-01-27T15:58:52.744Z
                             timestamp = int(round(
                                 datetime.datetime.strptime(created_at, '%Y-%m-%dT%X.%fZ').timestamp()
@@ -1911,7 +1977,7 @@ def parse_group_direct_messages(username, users, user_id_url_template, paths):
                 markdown += f'### Group conversation between {name_list}, part {chunk_index + 1}: ###\n\n----\n\n'
                 markdown += '\n\n----\n\n'.join(md for _, md in chunk)
                 conversation_output_filename = paths.create_path_for_file_output_dms(
-                    name=group_name, format="md", kind="DMs-Group", index=chunk_index + 1
+                    name=group_name, output_format="md", kind="DMs-Group", index=chunk_index + 1
                 )
                 
                 # write part to a markdown file
@@ -1925,7 +1991,7 @@ def parse_group_direct_messages(username, users, user_id_url_template, paths):
             markdown += f'### Group conversation between {name_list}: ###\n\n----\n\n'
             markdown += '\n\n----\n\n'.join(md for _, md in messages)
             conversation_output_filename = \
-                paths.create_path_for_file_output_dms(name=group_name, format="md", kind="DMs-Group")
+                paths.create_path_for_file_output_dms(name=group_name, output_format="md", kind="DMs-Group")
 
             with open_and_mkdirs(conversation_output_filename) as f:
                 f.write(markdown)
@@ -1993,7 +2059,8 @@ def migrate_old_output(paths: PathConfig):
             print(file_to_delete)
 
         print()
-        if get_consent('OK to delete these files? (If the the directory layout would not have changed, they would be overwritten anyway)', key='delete_old_files'):
+        if get_consent('OK to delete these files? (If the the directory layout would not have changed, '
+                       'they would be overwritten anyway)', key='delete_old_files'):
             for file_to_delete in files_to_delete:
                 os.remove(file_to_delete)
             print(f"Files have been deleted. New versions of these files will be generated into 'parser-output' soon.")
@@ -2013,7 +2080,8 @@ def export_user_data(users: dict, extended_user_data: dict, paths: PathConfig):
 
     extended_users_json: str = json.dumps(extended_user_data, indent=2)
     with open(os.path.join(paths.dir_output_cache, 'extended_user_data_cache.json'), 'w') as extended_users_file:
-        print(f'saving {len(extended_user_data.keys())} sets of extended user data to extended_user_data_cache.json ...')
+        print(f'saving {len(extended_user_data.keys())} '
+              f'sets of extended user data to extended_user_data_cache.json ...')
         extended_users_file.write(extended_users_json)
         print('extended user data saved.\n')
 
@@ -2028,7 +2096,7 @@ def find_archive():
     Search for the archive
     1. First try the working directory.
     2. Then try the script directory.
-    3. Finally prompt the user.
+    3. Finally, prompt the user.
     """
     if is_archive('.'):
         return '.'
@@ -2093,11 +2161,11 @@ def read_extended_user_data_from_cache(paths: PathConfig) -> dict:
 
 
 def download_user_images(extended_user_data: dict[str, dict], paths: PathConfig) -> None:
-     # Change suffix to choose another image size:
-        # URL suffix  -> image width and height
-        # _normal.ext -> 48
-        # _x96.ext    -> 96
-        # .ext        -> original or 400 ?
+    # Change suffix to choose another image size:
+    # URL suffix  -> image width and height
+    # _normal.ext -> 48
+    # _x96.ext    -> 96
+    # .ext        -> original or 400 ?
     size_suffix = "_x96"
 
     to_download: dict[str, str] = {}
@@ -2116,8 +2184,9 @@ def download_user_images(extended_user_data: dict[str, dict], paths: PathConfig)
     estimated_download_size_str = int(len(to_download) * 4.3)
 
     if len(to_download) > 0:
-        if get_consent(f'OK to start downloading {len(to_download)} user profile images (approx {estimated_download_size_str:,} KB)? '
-                    f'This will take at least {estimated_download_time_str}.', key='download_profile_images'):
+        if get_consent(f'OK to start downloading {len(to_download)} user profile images '
+                       f'(approx {estimated_download_size_str:,} KB)? '
+                       f'This will take at least {estimated_download_time_str}.', key='download_profile_images'):
             download_larger_media(to_download, paths)
 
 
@@ -2146,7 +2215,8 @@ def main():
 
     user_id_url_template = 'https://twitter.com/i/user/{}'
 
-    html_template = { "begin": """\
+    html_template = {
+        "begin": """\
 <!doctype html>
 <html lang="en">
 <head>
@@ -2228,10 +2298,10 @@ def main():
 <body>
     <h1>Your twitter archive</h1>
     <main class="container">""",
-"end": """    </main>
+        "end": """    </main>
 </body>
 </html>""",
-}
+    }
 
     users = read_users_from_cache(paths)
     extended_user_data = read_extended_user_data_from_cache(paths)
@@ -2241,8 +2311,7 @@ def main():
     # Make a folder to copy the images and videos into.
     os.makedirs(paths.dir_output_media, exist_ok=True)
     if not os.path.isfile(paths.file_tweet_icon):
-        shutil.copy('assets/images/favicon.ico', paths.file_tweet_icon)
-
+        shutil.copy(os.path.join(paths.dir_archive, 'assets/images/favicon.ico'), paths.file_tweet_icon)
 
     # Read tweets from paths.files_input_tweets, write to *.md and *.html.
     # Copy the media used to paths.dir_output_media.
@@ -2317,7 +2386,7 @@ def main():
     parse_group_direct_messages(username, users, user_id_url_template, paths)
 
     # TODO Maybe this should be split up, so that downloaded media can be used during convert?
-    # On the other hand, media in own tweets will be replaces by better versions, and
+    # On the other hand, media in own tweets will be replaced by better versions, and
     # for media from other users' tweets, we can try to use it, since we know the local path
     # even before it is actually downloaded.
 
@@ -2327,8 +2396,11 @@ def main():
     media_sources = convert_tweets(user_data, extended_user_data, html_template, tweets, paths)
 
     # Download larger images, if the user agrees
+    # TODO: this will also download media from retweets that did not exist locally in any size before.
+    #  Rephrase the prompt to reflect this.
     if len(media_sources) > 0:
-        print(f"\nThe archive doesn't contain the original-size images. We can attempt to download them from twimg.com.")
+        print(f"\nThe archive doesn't contain the original-size images. "
+              f"We can attempt to download them from twimg.com.")
         print(f'Please be aware that this script may download a lot of data, which will cost you money if you are')
         print(f'paying for bandwidth. Please be aware that the servers might block these requests if they are too')
         print(f'frequent. This script may not work if your account is protected. You may want to set it to public')
@@ -2337,7 +2409,7 @@ def main():
         estimated_download_time_str = format_duration(len(media_sources) * 0.4)
 
         if get_consent(f'OK to start downloading {len(media_sources)} media files? '
-            f'This will take at least {estimated_download_time_str}.', key='download_media'):
+                       f'This will take at least {estimated_download_time_str}.', key='download_media'):
 
             download_larger_media(media_sources, paths)
             print('In case you set your account to public before initiating the download, '
