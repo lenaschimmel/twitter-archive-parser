@@ -564,7 +564,7 @@ def collect_tweet_references(tweet, known_tweets):
                 if matches is not None:
                     # user_handle = matches[1]
                     quoted_id = matches[2]
-                    if quoted_id not in known_tweets:
+                    if quoted_id is not None and quoted_id not in known_tweets:
                         tweet_ids.add(quoted_id)
 
     # Collect previous tweet in conversation
@@ -575,14 +575,28 @@ def collect_tweet_references(tweet, known_tweets):
 
     # Collect retweets (adds the tweet itself)
     # Don't do this if we already re-downloaded this tweet
-    if not 'from_api' in tweet and 'full_text' in tweet and tweet['full_text'].startswith('RT @'):
-        tweet_ids.add(tweet['id_str'])
+    if 'from_api' not in tweet and 'full_text' in tweet and tweet['full_text'].startswith('RT @'):
+        if tweet['id_str'] is None:
+            print('Tweet has no id_str, this should not happen')
+            if 'id' in tweet and tweet['id'] is not None:
+                tweet_ids.add(str(tweet['id']))
+            else:
+                print('Tweet also has no id, this should really not happen')
+        else:
+            tweet_ids.add(tweet['id_str'])
 
     # Collect tweets with media, which might lack alt text
     # TODO we might filter for media which has "type" : "photo" because there is no alt text for videos
     # Don't do this if we already re-downloaded this tweet with alt texts enabled
-    if not 'download_with_alt_text' in tweet and has_path(tweet, ['entities', 'media']):
-        tweet_ids.add(tweet['id_str'])
+    if 'download_with_alt_text' not in tweet and has_path(tweet, ['entities', 'media']):
+        if tweet['id_str'] is None:
+            print('Tweet has no id_str, this should not happen')
+            if 'id' in tweet and tweet['id'] is not None:
+                tweet_ids.add(str(tweet['id']))
+            else:
+                print('Tweet also has no id, this should really not happen')
+        else:
+            tweet_ids.add(tweet['id_str'])
 
     if None in tweet_ids:
         raise Exception(f"Tweet has reference to other tweet with id None: {tweet}")
@@ -778,21 +792,25 @@ def convert_tweet_to_html_head(
 
     # build profile image output:
     size_suffix = "_x96"
-    profile_image_url_https = user['profile_image_url_https'].replace("_normal", size_suffix)
-    file_extension = os.path.splitext(profile_image_url_https)[1]
-    profile_image_file_name = user["id_str"] + file_extension
-    profile_image_file_path = os.path.join(paths.dir_output_media, "profile-images", profile_image_file_name)
-    # In the future, the five lines above can be replaced by this:
-    # profile_image_file_path = user['profile_image_file_path']
+    if 'profile_image_url_https' not in user or user['profile_image_url_https'] is None:
+        print(f'user {user["id_str"]} has no profile_image_url_https')
+        profile_image = ""
+    else:
+        profile_image_url_https = user['profile_image_url_https'].replace("_normal", size_suffix)
+        file_extension = os.path.splitext(profile_image_url_https)[1]
+        profile_image_file_name = user["id_str"] + file_extension
+        profile_image_file_path = os.path.join(paths.dir_output_media, "profile-images", profile_image_file_name)
+        # In the future, the five lines above can be replaced by this:
+        # profile_image_file_path = user['profile_image_file_path']
+
+        profile_image_rel_url = rel_url(profile_image_file_path, paths.example_file_output_tweets)
+        # TODO the entire group profile_image + user_name + user_handle should link to a local profile
+        profile_image = f'<a class="profile-picture" href="{profile_image_rel_url}" ' \
+                        f'title="Enlarge profile picture (local)"><img width="48" src="{profile_image_rel_url}" /></a>'
 
     # TODO maybe link to nitter or local profile page, add config for this
     user_profile_url = f'https://twitter.com/{user["screen_name"]}'
 
-    timestamp = f'<a class="tweet-timestamp" title="Tweet (twitter.com)" href="{tweet_url}">{egg["timestamp_str"]}</a>'
-    profile_image_rel_url = rel_url(profile_image_file_path, paths.example_file_output_tweets)
-
-    # TODO the entire group profile_image + user_name + user_handle should link to a local profile
-    profile_image = f'<a class="profile-picture" href="{profile_image_rel_url}" title="Enlarge profile picture (local)"><img width="48" src="{profile_image_rel_url}" /></a>'
     user_name = f'<span class="user-name" title="{user["description"]}">{user["name"]}</span>'
     user_handle = f'<a class="user-handle" title="User profile and tweets (twitter.com)" ' \
                   f'href="{user_profile_url}">@{user["screen_name"]}</a>'
