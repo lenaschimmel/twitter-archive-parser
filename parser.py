@@ -987,7 +987,7 @@ def collect_media_ids_from_tweet(tweet, media_sources: Optional[dict], paths: Pa
                     }
                     if media_sources is not None:
                         media_sources[file_output_media] = best_quality_url
-                elif media_type == "video":
+                elif media_type in ["video", "animated_gif"]:
                     # For videos, the filename might be found like this:
                     # Is there any other file that includes the tweet_id in its filename?
                     archive_media_paths = glob.glob(os.path.join(paths.dir_input_media, tweet_id_str + '*'))
