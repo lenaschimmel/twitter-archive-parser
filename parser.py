@@ -92,6 +92,7 @@ class PathConfig:
         self.file_output_followers          = os.path.join(self.dir_output,         'followers.txt')
         self.file_download_log              = os.path.join(self.dir_output_media,   'download_log.txt')
         self.file_tweet_icon                = os.path.join(self.dir_output_media,   'tweet.ico')
+        self.file_media_download_state      = os.path.join(self.dir_output_cache,   'media_download_state.json')
         self.files_input_tweets             = find_files_input_tweets(self.dir_input_data)
 
         # structured like an actual tweet output file, can be used to compute relative urls to a media file
@@ -146,7 +147,7 @@ def get_config(key: str) -> Optional[str]:
     if key == "download_users":
         return "y"
     if key == "download_media":
-        return "n"
+        return "y"
     if key == "delete_old_files":
         return "y"
     if key == "install_via_pip":
@@ -1172,7 +1173,7 @@ def download_file_if_larger(url, filename, index, count, sleep_time):
         return False, 0
 
 
-def download_larger_media(media_sources: dict, paths: PathConfig):
+def download_larger_media(media_sources: dict, paths: PathConfig, state: dict):
     """Uses (filename, URL) items in media_sources to download files from remote storage.
        Aborts download if the remote file is the same size or smaller than the existing local version.
        Retries the failed downloads several times, with increasing pauses between each to avoid being blocked.
@@ -1193,9 +1194,17 @@ def download_larger_media(media_sources: dict, paths: PathConfig):
         success_count = 0
         retries = {}
         for index, (local_media_path, media_url) in enumerate(media_sources.items()):
-            success, bytes_downloaded = download_file_if_larger(
-                media_url, local_media_path, index + 1, number_of_files, sleep_time
-            )
+            if state.get(media_url, {}).get('success'):
+                logging.info(f'{index + 1:3d}/{number_of_files:3d}  {local_media_path}:'\
+                    ' SKIPPED. File already successfully fetched. Not attempting to download.')
+                success = state.get(media_url, {}).get('success', False)
+                bytes_downloaded = state.get(media_url, {}).get('bytes_downloaded', 0)
+            else:
+                success, bytes_downloaded = download_file_if_larger(
+                    media_url, local_media_path, index + 1, number_of_files, sleep_time
+                )
+                state.update({media_url: {"local": local_media_path, "success": success, "downloaded": bytes_downloaded}})
+
             if success:
                 success_count += 1
             else:
@@ -2192,7 +2201,7 @@ def read_extended_user_data_from_cache(paths: PathConfig) -> dict:
         return extended_users_dict
 
 
-def download_user_images(extended_user_data: dict[str, dict], paths: PathConfig) -> None:
+def download_user_images(extended_user_data: dict[str, dict], paths: PathConfig, media_download_state: dict) -> None:
     # Change suffix to choose another image size:
     # URL suffix  -> image width and height
     # _normal.ext -> 48
@@ -2219,7 +2228,7 @@ def download_user_images(extended_user_data: dict[str, dict], paths: PathConfig)
         if get_consent(f'OK to start downloading {len(to_download)} user profile images '
                        f'(approx {estimated_download_size_str:,} KB)? '
                        f'This will take at least {estimated_download_time_str}.', key='download_profile_images'):
-            download_larger_media(to_download, paths)
+            download_larger_media(to_download, paths, media_download_state)
 
 
 def main():
@@ -2338,6 +2347,13 @@ def main():
     users = read_users_from_cache(paths)
     extended_user_data = read_extended_user_data_from_cache(paths)
 
+    # Use our state store to prevent duplicate downloads
+    try:
+        with open(paths.file_media_download_state, 'r') as state_file:
+            media_download_state = json.load(state_file)
+    except (IOError, json.decoder.JSONDecodeError):
+        media_download_state = {}
+
     migrate_old_output(paths)
 
     # Make a folder to copy the images and videos into.
@@ -2410,7 +2426,7 @@ def main():
 
     export_user_data(users, extended_user_data, paths)
 
-    download_user_images(extended_user_data, paths)
+    download_user_images(extended_user_data, paths, media_download_state)
 
     parse_followings(users, user_id_url_template, paths)
     parse_followers(users, user_id_url_template, paths)
@@ -2443,10 +2459,12 @@ def main():
         if get_consent(f'OK to start downloading {len(media_sources)} media files? '
                        f'This will take at least {estimated_download_time_str}.', key='download_media'):
 
-            download_larger_media(media_sources, paths)
+            download_larger_media(media_sources, paths, media_download_state)
             print('In case you set your account to public before initiating the download, '
                   'do not forget to protect it again.')
 
+    with open(paths.file_media_download_state, 'w') as state_file:
+        json.dump(media_download_state, state_file, sort_keys=True, indent=4)
 
 if __name__ == "__main__":
     main()
