@@ -1286,6 +1286,8 @@ def collect_user_ids_from_tweets(known_tweets) -> list:
                         mentioned_id = mention['id']
                         if int(mentioned_id) >= 0:  # some ids are -1, not sure why
                             user_ids_set.add(str(mentioned_id))
+        if has_path(tweet, ['retweeted_status', 'user', 'id_str']):
+            user_ids_set.add(tweet['retweeted_status']['user']['id_str'])
     return list(user_ids_set)
 
 
