@@ -960,6 +960,7 @@ def collect_media_ids_from_tweet(tweet, media_sources: Optional[dict], paths: Pa
         original_url = tweet['entities']['media'][0]['url']
         for media in tweet['extended_entities']['media']:
             if 'url' in media and 'media_url' in media and media['media_url'] is not None:
+                # Note: for videos the media_url points to a jpeg file, which is the thumbnail of the video
                 original_expanded_url = media['media_url']
                 original_filename = os.path.split(original_expanded_url)[1]
                 archive_media_filename = tweet_id_str + '-' + original_filename
@@ -986,7 +987,7 @@ def collect_media_ids_from_tweet(tweet, media_sources: Optional[dict], paths: Pa
                     if media_sources is not None:
                         media_sources[file_output_media] = best_quality_url
                 elif media_type == "video":
-                    # For images, the filename might be found like this:
+                    # For videos, the filename might be found like this:
                     # Is there any other file that includes the tweet_id in its filename?
                     archive_media_paths = glob.glob(os.path.join(paths.dir_input_media, tweet_id_str + '*'))
                     if len(archive_media_paths) > 0:
@@ -996,36 +997,49 @@ def collect_media_ids_from_tweet(tweet, media_sources: Optional[dict], paths: Pa
                             media_url = rel_url(file_output_media, paths.example_file_output_tweets)
                             if not os.path.isfile(file_output_media):
                                 shutil.copy(archive_media_path, file_output_media)
-                            # Save the online location of the best-quality version of this file,
-                            # for later upgrading if wanted
-                            if 'video_info' in media and 'variants' in media['video_info']:
-                                best_quality_url = ''
-                                best_bitrate = -1  # some valid videos are marked with bitrate=0 in the JSON
-                                for variant in media['video_info']['variants']:
-                                    if 'bitrate' in variant:
-                                        bitrate = int(variant['bitrate'])
-                                        if bitrate > best_bitrate:
-                                            best_quality_url = variant['url']
-                                            best_bitrate = bitrate
-                                if best_bitrate == -1:
-                                    print(f"Warning No URL found for {original_url} {original_expanded_url} "
-                                          f"{archive_media_path} {media_url}")
-                                    print(f"JSON: {tweet}")
-                                else:
-                                    if media_sources is not None:
-                                        media_sources[os.path.join(paths.dir_output_media, archive_media_filename)] = \
-                                            best_quality_url
-                                    tweet_media[media_id] = {
-                                        'type': media_type,
-                                        'original_url': original_url,
-                                        'best_quality_url': best_quality_url,
-                                        'local_filename': file_output_media,
-                                        'alt_text': '',
-                                        'id': media_id,
-                                    }
                     else:
+                        # when we reach this line, archive_media_filename and file_output_media still point to the 
+                        # name of the thumbnail jpeg, but we need a filename for the actual video. We can't
+                        # find out the name yet, so we just forget the jpeg name.
+                        archive_media_filename = None
+                        file_output_media = None
                         print(f'Warning: missing local file: {archive_media_path}. Using original link instead: '
                               f'{original_url} (expands to {original_expanded_url})')
+                    # Save the online location of the best-quality version of this file,
+                    # for later upgrading if wanted
+                    if 'video_info' in media and 'variants' in media['video_info']:
+                        best_quality_url = ''
+                        best_bitrate = -1  # some valid videos are marked with bitrate=0 in the JSON
+                        for variant in media['video_info']['variants']:
+                            if 'bitrate' in variant:
+                                bitrate = int(variant['bitrate'])
+                                if bitrate > best_bitrate:
+                                    best_quality_url = variant['url']
+                                    best_bitrate = bitrate
+                        if best_bitrate == -1:
+                            print(f"Warning No URL found for {original_url} {original_expanded_url} "
+                                    f"{archive_media_path} {media_url}")
+                            print(f"JSON: {tweet}")
+                        else:
+                            # if we don't have archive_media_filename and file_output_media, we try to build it
+                            # from the URL
+                            if archive_media_filename is None or file_output_media is None:
+                                archive_media_filename = os.path.split(best_quality_url)[-1]
+                                if '?' in archive_media_filename:
+                                    archive_media_filename = archive_media_filename[0:archive_media_filename.find('?')]
+                                file_output_media = os.path.join(paths.dir_output_media, archive_media_filename)
+
+                            if media_sources is not None:
+                                media_sources[os.path.join(paths.dir_output_media, archive_media_filename)] = \
+                                    best_quality_url
+                            tweet_media[media_id] = {
+                                'type': media_type,
+                                'original_url': original_url,
+                                'best_quality_url': best_quality_url,
+                                'local_filename': file_output_media,
+                                'alt_text': '',
+                                'id': media_id,
+                            }
                 else:
                     print(f"Unknown media type: {media_type}")
                     # TODO: something with media type "animated_gif"
