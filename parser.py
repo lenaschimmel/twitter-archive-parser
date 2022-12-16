@@ -1005,7 +1005,7 @@ def collect_media_ids_from_tweet(tweet, media_sources: Optional[dict], paths: Pa
                     }
                     if media_sources is not None:
                         media_sources[file_output_media] = best_quality_url
-                elif media_type == "video":
+                elif media_type in ["video", "animated_gif"]:
                     # For videos, the filename might be found like this:
                     # Is there any other file that includes the tweet_id in its filename?
                     archive_media_paths = glob.glob(os.path.join(paths.dir_input_media, tweet_id_str + '*'))
@@ -1212,15 +1212,17 @@ def download_larger_media(media_sources: dict, paths: PathConfig, state: dict):
             retries = {}
             for index, (local_media_path, media_url) in enumerate(media_sources.items()):
                 if state.get(media_url, {}).get('success'):
-                    logging.info(f'{index + 1:3d}/{number_of_files:3d}  {local_media_path}:'\
-                        ' SKIPPED. File already successfully fetched. Not attempting to download.')
+                    logging.info(f'{index + 1:3d}/{number_of_files:3d}  {local_media_path}:'
+                                 ' SKIPPED. File already successfully fetched. Not attempting to download.')
                     success = state.get(media_url, {}).get('success', False)
                     bytes_downloaded = state.get(media_url, {}).get('bytes_downloaded', 0)
                 else:
                     success, bytes_downloaded = download_file_if_larger(
                         media_url, local_media_path, index + 1, number_of_files, sleep_time
                     )
-                    state.update({media_url: {"local": local_media_path, "success": success, "downloaded": bytes_downloaded}})
+                    state.update(
+                        {media_url: {"local": local_media_path, "success": success, "downloaded": bytes_downloaded}}
+                    )
 
                 if success:
                     success_count += 1
@@ -1239,7 +1241,8 @@ def download_larger_media(media_sources: dict, paths: PathConfig, state: dict):
                 if index + 1 == number_of_files:
                     print('    100 % done.')
                 else:
-                    print(f'    {(100*(index+1)/number_of_files):.1f} % done, about {time_remaining_string} remaining...')
+                    print(f'    {(100*(index+1)/number_of_files):.1f} % done, '
+                          f'about {time_remaining_string} remaining...')
 
             media_sources = retries
             remaining_tries -= 1
