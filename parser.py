@@ -1187,52 +1187,59 @@ def download_larger_media(media_sources: dict, paths: PathConfig, state: dict):
     total_bytes_downloaded = 0
     sleep_time = 0.25
     remaining_tries = 5
-    while remaining_tries > 0:
-        number_of_files = len(media_sources)
-        success_count = 0
-        retries = {}
-        for index, (local_media_path, media_url) in enumerate(media_sources.items()):
-            if state.get(media_url, {}).get('success'):
-                logging.info(f'{index + 1:3d}/{number_of_files:3d}  {local_media_path}:'\
-                    ' SKIPPED. File already successfully fetched. Not attempting to download.')
-                success = state.get(media_url, {}).get('success', False)
-                bytes_downloaded = state.get(media_url, {}).get('bytes_downloaded', 0)
-            else:
-                success, bytes_downloaded = download_file_if_larger(
-                    media_url, local_media_path, index + 1, number_of_files, sleep_time
+    try:
+        while remaining_tries > 0:
+            number_of_files = len(media_sources)
+            success_count = 0
+            retries = {}
+            for index, (local_media_path, media_url) in enumerate(media_sources.items()):
+                if state.get(media_url, {}).get('success'):
+                    logging.info(f'{index + 1:3d}/{number_of_files:3d}  {local_media_path}:'\
+                        ' SKIPPED. File already successfully fetched. Not attempting to download.')
+                    success = state.get(media_url, {}).get('success', False)
+                    bytes_downloaded = state.get(media_url, {}).get('bytes_downloaded', 0)
+                else:
+                    success, bytes_downloaded = download_file_if_larger(
+                        media_url, local_media_path, index + 1, number_of_files, sleep_time
+                    )
+                    state.update({media_url: {"local": local_media_path, "success": success, "downloaded": bytes_downloaded}})
+
+                if success:
+                    success_count += 1
+                else:
+                    retries[local_media_path] = media_url
+                total_bytes_downloaded += bytes_downloaded
+
+                # show % done and estimated remaining time:
+                time_elapsed: float = time.time() - start_time
+                estimated_time_per_file: float = time_elapsed / (index + 1)
+
+                time_remaining_string = format_duration(
+                    seconds=(number_of_files - (index + 1)) * estimated_time_per_file
                 )
-                state.update({media_url: {"local": local_media_path, "success": success, "downloaded": bytes_downloaded}})
 
-            if success:
-                success_count += 1
-            else:
-                retries[local_media_path] = media_url
-            total_bytes_downloaded += bytes_downloaded
+                if index + 1 == number_of_files:
+                    print('    100 % done.')
+                else:
+                    print(f'    {(100*(index+1)/number_of_files):.1f} % done, about {time_remaining_string} remaining...')
 
-            # show % done and estimated remaining time:
-            time_elapsed: float = time.time() - start_time
-            estimated_time_per_file: float = time_elapsed / (index + 1)
+            media_sources = retries
+            remaining_tries -= 1
+            sleep_time += 2
+            logging.info(f'\n{success_count} of {number_of_files} tested media files '
+                         f'are known to be the best-quality available.\n')
+            if len(retries) == 0:
+                break
+            if remaining_tries > 0:
+                print(f'----------------------\n\nRetrying the ones that failed, with a longer sleep. '
+                      f'{remaining_tries} tries remaining.\n')
+        end_time = time.time()
 
-            time_remaining_string = format_duration(
-                seconds=(number_of_files - (index + 1)) * estimated_time_per_file
-            )
-
-            if index + 1 == number_of_files:
-                print('    100 % done.')
-            else:
-                print(f'    {(100*(index+1)/number_of_files):.1f} % done, about {time_remaining_string} remaining...')
-
-        media_sources = retries
-        remaining_tries -= 1
-        sleep_time += 2
-        logging.info(f'\n{success_count} of {number_of_files} tested media files '
-                     f'are known to be the best-quality available.\n')
-        if len(retries) == 0:
-            break
-        if remaining_tries > 0:
-            print(f'----------------------\n\nRetrying the ones that failed, with a longer sleep. '
-                  f'{remaining_tries} tries remaining.\n')
-    end_time = time.time()
+    except KeyboardInterrupt as e:
+        # save current state of download to avoid losing all of it when running the script is interrupted
+        export_media_download_state(state, paths)
+        print(f'\nsaved current media download state to {paths.file_media_download_state}')
+        sys.exit(1)
 
     logging.info(f'Total downloaded: {total_bytes_downloaded/2**20:.1f}MB = {total_bytes_downloaded/2**30:.2f}GB')
     logging.info(f'Time taken: {end_time-start_time:.0f}s')
@@ -2229,6 +2236,11 @@ def download_user_images(extended_user_data: dict[str, dict], paths: PathConfig,
             download_larger_media(to_download, paths, media_download_state)
 
 
+def export_media_download_state(media_download_state: dict, paths: PathConfig):
+    with open(paths.file_media_download_state, 'w') as state_file:
+        json.dump(media_download_state, state_file, sort_keys=True, indent=4)
+
+
 def main():
     p = ArgumentParser(
         description="Parse a Twitter archive and output in various ways"
@@ -2461,8 +2473,8 @@ def main():
             print('In case you set your account to public before initiating the download, '
                   'do not forget to protect it again.')
 
-    with open(paths.file_media_download_state, 'w') as state_file:
-        json.dump(media_download_state, state_file, sort_keys=True, indent=4)
+    export_media_download_state(media_download_state, paths)
+
 
 if __name__ == "__main__":
     main()
