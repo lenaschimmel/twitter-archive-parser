@@ -754,7 +754,10 @@ def convert_tweet(
     if media_sources is not None:
         egg['media'] = collect_media_ids_from_tweet(tweet, media_sources, paths)
 
-    md = convert_tweet_to_md(egg, own_user_data, extended_user_data, paths)
+    profile_image_size_suffix = "_x96"
+    add_user_metadata_to_egg(egg, users, extended_user_data, profile_image_size_suffix)
+
+    md = convert_tweet_to_md(egg, paths)
     html = convert_tweet_to_html(egg, own_user_data, users, extended_user_data, paths)
 
     # Do some other stuff that is traditionally done while converting a tweet
@@ -765,24 +768,17 @@ def convert_tweet(
     return egg['timestamp'], md, html
 
 
-def convert_tweet_to_html_head( 
-    egg: dict,
-    users: dict[str, UserData],
-    extended_user_data: dict, 
-    paths: PathConfig,
-) -> str:
-    """Returns the <div class="tweet-header"> with all needed contents for a tweet."""
-
-    size_suffix = "_x96"
-
-    timestamp = f'<span class="tweet-timestamp">{egg["timestamp_str"]}</span>'
+def add_user_metadata_to_egg(egg: dict, users: dict, extended_user_data: dict, profile_image_size_suffix: str) -> dict:
+    """
+    adds user metadata like name, screen name, description and profile image to an egg
+    """
     if egg['user_id'] in extended_user_data:
         user: dict = extended_user_data[egg['user_id']]
         user_screen_name = user["screen_name"]
         user_description = user["description"]
         user_name = user["name"]
         user_id_str = user["id_str"]
-        profile_image_url_https = user['profile_image_url_https'].replace("_normal", size_suffix)
+        profile_image_url_https = user['profile_image_url_https'].replace("_normal", profile_image_size_suffix)
         # TODO maybe link to nitter or local profile page, add config for this
         user_profile_url = f'https://twitter.com/{user_screen_name}'
     elif egg['user_id'] in users:
@@ -801,8 +797,24 @@ def convert_tweet_to_html_head(
         profile_image_url_https = None
         user_profile_url = f'https://twitter.com/i/user/{user_id_str}'
 
+    egg['user_screen_name'] = user_screen_name
+    egg['user_description'] = user_description
+    egg['user_name'] = user_name
+    egg['user_id_str'] = user_id_str
+    egg['profile_image_url_https'] = profile_image_url_https
+    egg['user_profile_url'] = user_profile_url
+
+    return egg
+
+
+def convert_tweet_to_html_head( 
+    egg: dict,
+    paths: PathConfig,
+) -> str:
+    """Returns the <div class="tweet-header"> with all needed contents for a tweet."""
+
     # TODO maybe link to nitter, add config for this
-    tweet_url = f'https://twitter.com/{user_screen_name}/status/{egg["id"]}'
+    tweet_url = f'https://twitter.com/{egg["user_screen_name"]}/status/{egg["id"]}'
 
     if 'retweeted_timestamp_str' in egg:
         timestamp = f'<span class="tweet-timestamp">originally posted at <a title="Tweet (twitter.com)" ' \
@@ -814,12 +826,12 @@ def convert_tweet_to_html_head(
         retweet_timestamp = ''
 
     # build profile image output:
-    if profile_image_url_https is None:
-        print(f'user {user_id_str} has no profile_image_url_https')
+    if egg["profile_image_url_https"] is None:
+        print(f'user {egg["user_id_str"]} has no profile_image_url_https')
         profile_image_html = ""
     else:
-        file_extension = os.path.splitext(profile_image_url_https)[1]
-        profile_image_file_name = user_id_str + file_extension
+        file_extension = os.path.splitext(egg["profile_image_url_https"])[1]
+        profile_image_file_name = egg["user_id_str"] + file_extension
         profile_image_file_path = os.path.join(paths.dir_output_media, "profile-images", profile_image_file_name)
         # In the future, the five lines above can be replaced by this:
         # profile_image_file_path = user['profile_image_file_path']
@@ -827,13 +839,15 @@ def convert_tweet_to_html_head(
         profile_image_rel_url = rel_url(profile_image_file_path, paths.example_file_output_tweets)
         # TODO the entire group profile_image + user_name + user_handle should link to a local profile
         profile_image_html = f'<a class="profile-picture" href="{profile_image_rel_url}" ' \
-                        f'title="Enlarge profile picture (local)"><img width="48" src="{profile_image_rel_url}" /></a>'
+                             f'title="Enlarge profile picture (local)">' \
+                             f'<img width="48" src="{profile_image_rel_url}" /></a>'
 
-    user_name_html = f'<span class="user-name" title="{user_description}">{user_name}</span>'
+    user_name_html = f'<span class="user-name" title="{egg["user_description"]}">{egg["user_name"]}</span>'
     user_handle_html = f'<a class="user-handle" title="User profile and tweets (twitter.com)" ' \
-                  f'href="{user_profile_url}">@{user_screen_name}</a>'
+                       f'href="{egg["user_profile_url"]}">@{egg["user_screen_name"]}</a>'
     
-    return f'<div class="tweet-header">{profile_image_html}<div class="upper-line">{user_handle_html}{timestamp}</div>' \
+    return f'<div class="tweet-header">{profile_image_html}' \
+           f'<div class="upper-line">{user_handle_html}{timestamp}</div>' \
            f'<div class="lower-line">{user_name_html}{retweet_timestamp}</div></div>'
 
 
@@ -868,7 +882,7 @@ def convert_tweet_to_html(
 
     # TODO add links for mentions
 
-    header_html = convert_tweet_to_html_head(egg, users, extended_user_data, paths)
+    header_html = convert_tweet_to_html_head(egg, paths)
 
     all_media_html = ""
     # handle media: append img tags and remove image URL from text
@@ -914,12 +928,14 @@ def convert_tweet_to_html(
 
 def convert_tweet_to_md(
     egg: dict,
-    own_user_data: UserData,
-    extended_user_data: dict, 
     paths: PathConfig,
 ) -> str:
 
     body_markdown = egg['full_text']
+
+    # if the tweet is a retweet, insert the handle of the user being retweeted before the body:
+    if 'is_retweeted' in egg and 'user_screen_name' in egg:
+        body_markdown = f'RT @{egg["user_screen_name"]}: {body_markdown}'
 
     # replace t.co URLs with their original versions
     for url in egg['urls']:
