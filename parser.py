@@ -1004,8 +1004,7 @@ def collect_media_ids_from_tweet(tweet, media_sources: Optional[dict], paths: Pa
                         # find out the name yet, so we just forget the jpeg name.
                         archive_media_filename = None
                         file_output_media = None
-                        print(f'Warning: missing local file: {archive_media_path}. Using original link instead: '
-                              f'{original_url} (expands to {original_expanded_url})')
+                        
                     # Save the online location of the best-quality version of this file,
                     # for later upgrading if wanted
                     if 'video_info' in media and 'variants' in media['video_info']:
@@ -1018,9 +1017,8 @@ def collect_media_ids_from_tweet(tweet, media_sources: Optional[dict], paths: Pa
                                     best_quality_url = variant['url']
                                     best_bitrate = bitrate
                         if best_bitrate == -1:
-                            print(f"Warning No URL found for {original_url} {original_expanded_url} "
-                                    f"{archive_media_path} {media_url}")
-                            print(f"JSON: {tweet}")
+                            print(f"Warning No URL found for the actual video file in tweet '{tweet_id_str}'. '\
+                                'Media URL: '{original_url}', expands to: '{original_expanded_url}'.")
                         else:
                             # if we don't have archive_media_filename and file_output_media, we try to build it
                             # from the URL
