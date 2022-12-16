@@ -2211,7 +2211,7 @@ def download_user_images(extended_user_data: dict[str, dict], paths: PathConfig,
 
     to_download: dict[str, str] = {}
     for user in extended_user_data.values():
-        if 'profile_image_url_https' in user.keys() and user['profile_image_url_https'] is not None:
+        if 'profile_image_url_https' in user.keys() and user['profile_image_url_https'] is not None and len(user['profile_image_url_https']) > 0:
             profile_image_url_https = user['profile_image_url_https'].replace("_normal", size_suffix)
             file_extension = os.path.splitext(profile_image_url_https)[1]
             profile_image_file_name = user["id_str"] + file_extension
