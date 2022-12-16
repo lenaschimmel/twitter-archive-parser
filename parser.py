@@ -632,6 +632,7 @@ def convert_tweet(
         known_tweets: Optional[dict],
         own_user_data: UserData,
         media_sources: Optional[dict],
+        users: dict[str, UserData],
         extended_user_data: dict,
         paths: PathConfig,
 ) -> Tuple[int, str, str]:
@@ -754,7 +755,7 @@ def convert_tweet(
         egg['media'] = collect_media_ids_from_tweet(tweet, media_sources, paths)
 
     md = convert_tweet_to_md(egg, own_user_data, extended_user_data, paths)
-    html = convert_tweet_to_html(egg, own_user_data, extended_user_data, paths)
+    html = convert_tweet_to_html(egg, own_user_data, users, extended_user_data, paths)
 
     # Do some other stuff that is traditionally done while converting a tweet
     # This used to get the "simple" users dict, but we use extended_user_data now.
@@ -766,21 +767,42 @@ def convert_tweet(
 
 def convert_tweet_to_html_head( 
     egg: dict,
+    users: dict[str, UserData],
     extended_user_data: dict, 
     paths: PathConfig,
 ) -> str:
     """Returns the <div class="tweet-header"> with all needed contents for a tweet."""
 
-    # Fallback header in case we don't have a user_id and can't construct the tweet_url
-    timestamp = f'<span class="tweet-timestamp">{egg["timestamp_str"]}</span>'
-    if egg['user_id'] not in extended_user_data:
-        return f'<div class="tweet-header"><div class="upper-line"><span class="user-handle">unknown</span>' \
-               f'{timestamp}</div><div class="lower-line"><span class="user-name">Unknown user></span></div></div>'
+    size_suffix = "_x96"
 
-    user = extended_user_data[egg['user_id']]
+    timestamp = f'<span class="tweet-timestamp">{egg["timestamp_str"]}</span>'
+    if egg['user_id'] in extended_user_data:
+        user: dict = extended_user_data[egg['user_id']]
+        user_screen_name = user["screen_name"]
+        user_description = user["description"]
+        user_name = user["name"]
+        user_id_str = user["id_str"]
+        profile_image_url_https = user['profile_image_url_https'].replace("_normal", size_suffix)
+        # TODO maybe link to nitter or local profile page, add config for this
+        user_profile_url = f'https://twitter.com/{user_screen_name}'
+    elif egg['user_id'] in users:
+        user: UserData = users[egg['user_id']]
+        user_screen_name = user.handle
+        user_description = "(user profile not available)"
+        user_name = "(unknown / @{user.handle})"
+        user_id_str = str(egg['user_id'])
+        profile_image_url_https = None
+        user_profile_url = f'https://twitter.com/{user_screen_name}'
+    else:
+        user_screen_name = "unknown_user"
+        user_description = "(user profile not available)"
+        user_name = "(unknown)"
+        user_id_str = str(egg['user_id'])
+        profile_image_url_https = None
+        user_profile_url = f'https://twitter.com/i/user/{user_id_str}'
 
     # TODO maybe link to nitter, add config for this
-    tweet_url = f'https://twitter.com/{user["screen_name"]}/status/{egg["id"]}'
+    tweet_url = f'https://twitter.com/{user_screen_name}/status/{egg["id"]}'
 
     if 'retweeted_timestamp_str' in egg:
         timestamp = f'<span class="tweet-timestamp">originally posted at <a title="Tweet (twitter.com)" ' \
@@ -792,37 +814,33 @@ def convert_tweet_to_html_head(
         retweet_timestamp = ''
 
     # build profile image output:
-    size_suffix = "_x96"
-    if 'profile_image_url_https' not in user or user['profile_image_url_https'] is None:
-        print(f'user {user["id_str"]} has no profile_image_url_https')
-        profile_image = ""
+    if profile_image_url_https is None:
+        print(f'user {user_id_str} has no profile_image_url_https')
+        profile_image_html = ""
     else:
-        profile_image_url_https = user['profile_image_url_https'].replace("_normal", size_suffix)
         file_extension = os.path.splitext(profile_image_url_https)[1]
-        profile_image_file_name = user["id_str"] + file_extension
+        profile_image_file_name = user_id_str + file_extension
         profile_image_file_path = os.path.join(paths.dir_output_media, "profile-images", profile_image_file_name)
         # In the future, the five lines above can be replaced by this:
         # profile_image_file_path = user['profile_image_file_path']
 
         profile_image_rel_url = rel_url(profile_image_file_path, paths.example_file_output_tweets)
         # TODO the entire group profile_image + user_name + user_handle should link to a local profile
-        profile_image = f'<a class="profile-picture" href="{profile_image_rel_url}" ' \
+        profile_image_html = f'<a class="profile-picture" href="{profile_image_rel_url}" ' \
                         f'title="Enlarge profile picture (local)"><img width="48" src="{profile_image_rel_url}" /></a>'
 
-    # TODO maybe link to nitter or local profile page, add config for this
-    user_profile_url = f'https://twitter.com/{user["screen_name"]}'
-
-    user_name = f'<span class="user-name" title="{user["description"]}">{user["name"]}</span>'
-    user_handle = f'<a class="user-handle" title="User profile and tweets (twitter.com)" ' \
-                  f'href="{user_profile_url}">@{user["screen_name"]}</a>'
+    user_name_html = f'<span class="user-name" title="{user_description}">{user_name}</span>'
+    user_handle_html = f'<a class="user-handle" title="User profile and tweets (twitter.com)" ' \
+                  f'href="{user_profile_url}">@{user_screen_name}</a>'
     
-    return f'<div class="tweet-header">{profile_image}<div class="upper-line">{user_handle}{timestamp}</div>' \
-           f'<div class="lower-line">{user_name}{retweet_timestamp}</div></div>'
+    return f'<div class="tweet-header">{profile_image_html}<div class="upper-line">{user_handle_html}{timestamp}</div>' \
+           f'<div class="lower-line">{user_name_html}{retweet_timestamp}</div></div>'
 
 
 def convert_tweet_to_html(
     egg: dict,
     own_user_data: UserData,
+    users: dict[str, UserData],
     extended_user_data: dict, 
     paths: PathConfig,
 ) -> str:
@@ -850,7 +868,7 @@ def convert_tweet_to_html(
 
     # TODO add links for mentions
 
-    header_html = convert_tweet_to_html_head(egg, extended_user_data, paths)
+    header_html = convert_tweet_to_html_head(egg, users, extended_user_data, paths)
 
     all_media_html = ""
     # handle media: append img tags and remove image URL from text
@@ -882,7 +900,7 @@ def convert_tweet_to_html(
                 inner_user_data = UserData(inner_user_id, 'unknown user')
         else:
             inner_user_data = own_user_data
-        _, _, inner_tweet_html = convert_tweet(inner_tweet, None, inner_user_data, None, extended_user_data, paths)
+        _, _, inner_tweet_html = convert_tweet(inner_tweet, None, inner_user_data, None, users, extended_user_data, paths)
         all_media_html += f'<div class="quote-tweet">{inner_tweet_html}</div>'
 
     full_html = pre_header_html + header_html + '<div class="tweet-body">\n' + body_html + '\n' + \
@@ -1393,7 +1411,8 @@ def download_tweets(
 
 
 def convert_tweets(
-        user_data: UserData,
+        own_user_data: UserData,
+        users: dict[str, UserData],
         extended_user_data: dict,
         html_template: dict,
         known_tweets: dict[str, dict],
@@ -1407,7 +1426,7 @@ def convert_tweets(
             # known_tweets will contain tweets that do not belong directly into our output
             if 'from_archive' in tweet and tweet['from_archive'] is True:
                 # Generate output for this tweet, and at the same time collect its media ids
-                converted_tweets.append(convert_tweet(tweet, known_tweets, user_data, media_sources, extended_user_data, paths))
+                converted_tweets.append(convert_tweet(tweet, known_tweets, own_user_data, media_sources, users, extended_user_data, paths))
             else:
                 # Only collect media ids
                 collect_media_ids_from_tweet(tweet, media_sources, paths)
@@ -2261,8 +2280,8 @@ def main():
     paths = PathConfig(dir_archive=input_folder)
 
     # Extract the archive owner's identity from data/account.js
-    user_data = extract_user_data(paths)
-    username = user_data.handle
+    own_user_data = extract_user_data(paths)
+    username = own_user_data.handle
 
     user_id_url_template = 'https://twitter.com/i/user/{}'
 
@@ -2448,10 +2467,10 @@ def main():
     # for media from other users' tweets, we can try to use it, since we know the local path
     # even before it is actually downloaded.
 
-    # media_sources = collect_media_sources_from_tweets(tweets, paths)
-    # # download media_sources
-    # convert_tweets(username, users, html_template, tweets, paths)
-    media_sources = convert_tweets(user_data, extended_user_data, html_template, tweets, paths)
+    # media_sources = collect_media_sources_from_tweets(...)
+    # download_larger_media(...)
+    # convert_tweets(...)
+    media_sources = convert_tweets(own_user_data, users, extended_user_data, html_template, tweets, paths)
 
     # Download larger images, if the user agrees
     # TODO: this will also download media from retweets that did not exist locally in any size before.
