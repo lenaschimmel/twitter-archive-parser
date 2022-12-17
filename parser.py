@@ -90,7 +90,7 @@ class PathConfig:
         self.dir_output_cache               = os.path.join(self.dir_archive,        'parser-cache')
         self.file_output_following          = os.path.join(self.dir_output,         'following.txt')
         self.file_output_followers          = os.path.join(self.dir_output,         'followers.txt')
-        self.file_download_log              = os.path.join(self.dir_output_media,   'download_log.txt')
+        self.file_download_log              = os.path.join(self.dir_output_cache,   'download_log.txt')
         self.file_tweet_icon                = os.path.join(self.dir_output_media,   'tweet.ico')
         self.file_media_download_state      = os.path.join(self.dir_output_cache,   'media_download_state.json')
         self.files_input_tweets             = find_files_input_tweets(self.dir_input_data)
@@ -1123,20 +1123,18 @@ def find_dir_input_media(dir_path_input_data):
     return input_media_dirs[0]
 
 
-def download_file_if_larger(url, filename, index, count, sleep_time) -> Tuple[bool, Optional[str], int]:
+def download_file_if_larger(url, filename, progress: str) -> Tuple[bool, Optional[str], int]:
     """Attempts to download from the specified URL. Overwrites file if larger.
        Returns whether the file is now known to be the largest available, and the number of bytes downloaded.
     """
     requests = import_module('requests')
     imagesize = import_module('imagesize')
 
-    pref = f'{index:3d}/{count:3d} {filename}: '
-    # Sleep briefly, in an attempt to minimize the possibility of triggering some auto-cutoff mechanism
-    if index > 1:
-        print(f'{pref}Sleeping...', end='\r')
-        time.sleep(sleep_time)
     # Request the URL (in stream mode so that we can conditionally abort depending on the headers)
-    print(f'{pref}Requesting headers for {url}...', end='\r')
+    pref = "    "
+    logging.info(f'URL: {url}')
+    print(f'{pref}Requesting headers...')
+    print(progress, end='\r')
     if os.path.exists(filename):
         byte_size_before = os.path.getsize(filename)
     else:
@@ -1147,17 +1145,18 @@ def download_file_if_larger(url, filename, index, count, sleep_time) -> Tuple[bo
                 # Try to get content of response as `res.text`.
                 # For twitter.com, this will be empty in most (all?) cases.
                 # It is successfully tested with error responses from other domains.
-                print(f'Download failed with status "{res.status_code} {res.reason}". '
+                logging.error(f'{pref}Download failed with status "{res.status_code} {res.reason}". '
                                 f'Response content: "{res.text}"')
                 return False, f"status {res.status_code}", 0
             byte_size_after = int(res.headers['content-length'])
             if byte_size_after != byte_size_before:
                 # Proceed with the full download
                 tmp_filename = filename+'.tmp'
-                print(f'{pref}Downloading {url}...            ', end='\r')
+                print(f'{pref}Downloading...                                                          ')
+                print(progress, end='\r')
                 with open(tmp_filename, 'wb') as f:
                     shutil.copyfileobj(res.raw, f)
-                post = f'{byte_size_after/2**20:.1f}MB downloaded'
+                post = '' # f'{byte_size_after/2**20:.1f}MB downloaded'
 
                 if byte_size_before > 0:
                     width_before, height_before = imagesize.get(filename)
@@ -1195,6 +1194,7 @@ def download_file_if_larger(url, filename, index, count, sleep_time) -> Tuple[bo
                         return True, None, byte_size_after
                 else:  # File did not exist before
                     os.replace(tmp_filename, filename)
+                    logging.info(f'{pref}SUCCESS. Previously missing file is present now. {post}')
                     return True, None, byte_size_after
             else:
                 logging.info(f'{pref}SKIPPED. Online version is same byte size, assuming same content. Not downloaded.')
@@ -1220,34 +1220,31 @@ def download_larger_media(media_sources: dict, paths: PathConfig, state: dict):
     total_bytes_downloaded = 0
     sleep_time = 0.25
     remaining_tries = 5
+
+    remaining_media_sources = list(media_sources.items())
+   
     try:
         while remaining_tries > 0:
-            number_of_files = len(media_sources)
-            success_count = 0
-            retries = {}
-            for index, (local_media_path, media_url) in enumerate(media_sources.items()):
+            new_remaining_media_sources = []
+            for item in remaining_media_sources:
+                local_media_path, media_url = item[0], item[1]
                 if state.get(media_url, {}).get('success'):
-                    logging.info(f'{index + 1:3d}/{number_of_files:3d}  {local_media_path}:'
-                                 ' SKIPPED. File already successfully fetched. Not attempting to download.')
-                    success = state.get(media_url, {}).get('success', False)
-                    bytes_downloaded = state.get(media_url, {}).get('bytes_downloaded', 0)
-                else:
-                    # Don't retry after certain status codes which are assumed to be permanent failures
-                    if state.get(media_url, {}).get('error') not in ["status 403", "status 404"]:
-                        success, download_error, bytes_downloaded = download_file_if_larger(
-                            media_url, local_media_path, index + 1, number_of_files, sleep_time
-                        )
-                        state.update(
-                            {media_url: {"local": local_media_path, "success": success, "error": download_error, "downloaded": bytes_downloaded}}
-                        )
+                    continue
+                if state.get(media_url, {}).get('error') in ["status 403", "status 404"]:
+                   continue
+                new_remaining_media_sources.append( (local_media_path, media_url) )
 
-                if success:
-                    success_count += 1
-                else:
-                    retries[local_media_path] = media_url
-                total_bytes_downloaded += bytes_downloaded
+            remaining_media_sources = new_remaining_media_sources
 
-                # show % done and estimated remaining time:
+            number_of_files = len(remaining_media_sources)
+            success_count = 0
+            retries = []
+
+            if number_of_files > 0:
+                print(f"\nTry to download remaining {number_of_files} files...\n")
+
+            for index, (local_media_path, media_url) in enumerate(remaining_media_sources):
+                 # show % done and estimated remaining time:
                 time_elapsed: float = time.time() - start_time
                 estimated_time_per_file: float = time_elapsed / (index + 1)
 
@@ -1256,12 +1253,29 @@ def download_larger_media(media_sources: dict, paths: PathConfig, state: dict):
                 )
 
                 if index + 1 == number_of_files:
-                    print('    100 % done.')
+                    percent = '100'
                 else:
-                    print(f'    {(100*(index+1)/number_of_files):.1f} % done, '
-                          f'about {time_remaining_string} remaining...')
+                    percent = f'{(100*(index+1)/number_of_files):.1f}'
 
-            media_sources = retries
+                progress = f'{index+1:3d}/{number_of_files:3d} = {percent}% done. About {time_remaining_string} remaining.'
+                # Sleep briefly, in an attempt to minimize the possibility of triggering some auto-cutoff mechanism
+                print(progress, end='\r')
+                time.sleep(sleep_time)
+
+                success, download_error, bytes_downloaded = download_file_if_larger(
+                    media_url, local_media_path, progress
+                )
+                state.update(
+                    {media_url: {"local": local_media_path, "success": success, "error": download_error, "downloaded": bytes_downloaded}}
+                )
+
+                if success:
+                    success_count += 1
+                else:
+                    retries.append( (local_media_path, media_url) )
+                total_bytes_downloaded += bytes_downloaded
+
+            remaining_media_sources = retries
             remaining_tries -= 1
             sleep_time += 2
             logging.info(f'\n{success_count} of {number_of_files} tested media files '
@@ -2271,9 +2285,10 @@ def download_user_images(extended_user_data: dict[str, dict], paths: PathConfig,
     estimated_download_size_str = int(len(to_download) * 4.3)
 
     if len(to_download) > 0:
-        if get_consent(f'OK to start downloading {len(to_download)} user profile images '
+        if get_consent(f'OK to start downloading up to {len(to_download)} user profile images '
                        f'(approx {estimated_download_size_str:,} KB)? '
-                       f'This will take at least {estimated_download_time_str}.', key='download_profile_images'):
+                       f'This could take about {estimated_download_time_str}, or less if some '
+                       f'of the files are already downloaded before.', key='download_profile_images'):
             download_larger_media(to_download, paths, media_download_state)
 
 
@@ -2509,7 +2524,8 @@ def main():
         estimated_download_time_str = format_duration(len(media_sources) * 0.4)
 
         if get_consent(f'OK to start downloading {len(media_sources)} media files? '
-                       f'This will take at least {estimated_download_time_str}.', key='download_media'):
+                       f'This could take about {estimated_download_time_str}, or less if some '
+                       f'of the files are already downloaded before.', key='download_media'):
 
             download_larger_media(media_sources, paths, media_download_state)
             print('In case you set your account to public before initiating the download, '
