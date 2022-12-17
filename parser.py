@@ -640,7 +640,7 @@ def convert_tweet(
     tweet = unwrap_tweet(tweet)
 
     if 'full_text' not in tweet or tweet['full_text'] is None:
-        raise EmptyTweetFullTextError('empty full_text - tweet or user has probably been withheld.')
+        raise EmptyTweetFullTextError('empty full_text - tweet or user has probably been withheld, blocked you, or protected their account.')
 
     # Unwrap retweets
     if has_path(tweet, ['retweeted_status']):
@@ -748,8 +748,9 @@ def convert_tweet(
                     quoted_id = matches[2]
                     if known_tweets is not None and quoted_id in known_tweets:
                         egg['inner_tweet'] = known_tweets[quoted_id]
-                    else:
-                        print(f'Tweet {tweet["id_str"]} quotes tweet {quoted_id} but quoted tweet is not known.')
+                    elif "from_archive" in tweet and tweet["from_archive"] is True:
+                        print(f'Tweet {tweet["id_str"]} is part of the original archive and quotes tweet {quoted_id} but quoted tweet is not known.')
+                        # if a tweet that is not from the archive contains a tweet, it's expected to be unknown, since we don't recurse deeper into quoted tweets.
 
     if media_sources is not None:
         egg['media'] = collect_media_ids_from_tweet(tweet, media_sources, paths)
@@ -914,7 +915,10 @@ def convert_tweet_to_html(
                 inner_user_data = UserData(inner_user_id, 'unknown user')
         else:
             inner_user_data = own_user_data
-        _, _, inner_tweet_html = convert_tweet(inner_tweet, None, inner_user_data, None, users, extended_user_data, paths)
+        try:
+            _, _, inner_tweet_html = convert_tweet(inner_tweet, None, inner_user_data, None, users, extended_user_data, paths)
+        except Exception as error:
+            inner_tweet_html = f"<i>Could not convert quoted tweet because of error: {error}</i>"
         all_media_html += f'<div class="quote-tweet">{inner_tweet_html}</div>'
 
     full_html = pre_header_html + header_html + '<div class="tweet-body">\n' + body_html + '\n' + \
