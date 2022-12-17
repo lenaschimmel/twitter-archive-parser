@@ -999,7 +999,6 @@ def collect_media_ids_from_tweet(tweet, media_sources: Optional[dict], paths: Pa
                 original_expanded_url = media['media_url']
                 original_filename = os.path.split(original_expanded_url)[1]
                 archive_media_filename = tweet_id_str + '-' + original_filename
-                archive_media_path = os.path.join(paths.dir_input_media, archive_media_filename)
                 media_id = media['id_str']
 
                 media_type = media['type']
@@ -1026,10 +1025,10 @@ def collect_media_ids_from_tweet(tweet, media_sources: Optional[dict], paths: Pa
                     # Is there any other file that includes the tweet_id in its filename?
                     archive_media_paths = glob.glob(os.path.join(paths.dir_input_media, tweet_id_str + '*'))
                     if len(archive_media_paths) > 0:
+                        file_output_media = None
                         for archive_media_path in archive_media_paths:
                             archive_media_filename = os.path.split(archive_media_path)[-1]
                             file_output_media = os.path.join(paths.dir_output_media, archive_media_filename)
-                            media_url = rel_url(file_output_media, paths.example_file_output_tweets)
                             if not os.path.isfile(file_output_media):
                                 shutil.copy(archive_media_path, file_output_media)
                     else:
@@ -1075,7 +1074,6 @@ def collect_media_ids_from_tweet(tweet, media_sources: Optional[dict], paths: Pa
                             }
                 else:
                     print(f"Unknown media type: {media_type}")
-                    # TODO: something with media type "animated_gif"
     return tweet_media
 
 
@@ -1105,7 +1103,7 @@ def find_files_input_tweets(dir_path_input_data):
     files_paths_input_tweets = []
     for input_tweets_file_template in input_tweets_file_templates:
         files_paths_input_tweets += glob.glob(os.path.join(dir_path_input_data, input_tweets_file_template))
-    if len(files_paths_input_tweets)==0:
+    if len(files_paths_input_tweets) == 0:
         print(f'Error: no files matching {input_tweets_file_templates} in {dir_path_input_data}')
         exit()
     return files_paths_input_tweets
@@ -2493,11 +2491,10 @@ def main():
     # convert_tweets(...)
     media_sources = convert_tweets(own_user_data, users, extended_user_data, html_template, tweets, paths)
 
-    # Download larger images, if the user agrees
-    # TODO: this will also download media from retweets that did not exist locally in any size before.
-    #  Rephrase the prompt to reflect this.
+    # Download larger images and additional media, if the user agrees
     if len(media_sources) > 0:
-        print(f"\nThe archive doesn't contain the original-size images. "
+        print(f"\nThe archive doesn't contain the original size of images from your own tweets. "
+              f"It also doesn't contain images from retweets, as well as animated gifs and some videos. "
               f"We can attempt to download them from twimg.com.")
         print(f'Please be aware that this script may download a lot of data, which will cost you money if you are')
         print(f'paying for bandwidth. Please be aware that the servers might block these requests if they are too')
