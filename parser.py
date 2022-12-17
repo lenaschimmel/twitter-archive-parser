@@ -2418,6 +2418,10 @@ def main():
     download_tweets(tweets, tweet_ids_to_download, paths)
 
     user_ids_from_tweets = collect_user_ids_from_tweets(tweets)
+    # Make sure to include the owner's user id in the list to look up metadata for:
+    # This is mostly useful for accounts who don't ever appear as mentioned or retweeted in their own tweets
+    # (for example bots posting generative content and not interacting with others).
+    user_ids_from_tweets.append(own_user_data.user_id)
     print(f'found {len(user_ids_from_tweets)} user IDs in tweets.')
     following_ids = collect_user_ids_from_followings(paths)
     print(f'found {len(following_ids)} user IDs in followings.')
