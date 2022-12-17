@@ -1123,7 +1123,7 @@ def find_dir_input_media(dir_path_input_data):
     return input_media_dirs[0]
 
 
-def download_file_if_larger(url, filename, index, count, sleep_time):
+def download_file_if_larger(url, filename, index, count, sleep_time) -> Tuple[bool, Optional[str], int]:
     """Attempts to download from the specified URL. Overwrites file if larger.
        Returns whether the file is now known to be the largest available, and the number of bytes downloaded.
     """
@@ -1147,8 +1147,9 @@ def download_file_if_larger(url, filename, index, count, sleep_time):
                 # Try to get content of response as `res.text`.
                 # For twitter.com, this will be empty in most (all?) cases.
                 # It is successfully tested with error responses from other domains.
-                raise Exception(f'Download failed with status "{res.status_code} {res.reason}". '
+                print(f'Download failed with status "{res.status_code} {res.reason}". '
                                 f'Response content: "{res.text}"')
+                return False, f"status {res.status_code}", 0
             byte_size_after = int(res.headers['content-length'])
             if byte_size_after != byte_size_before:
                 # Proceed with the full download
@@ -1170,12 +1171,12 @@ def download_file_if_larger(url, filename, index, count, sleep_time):
                         bytes_percentage_increase = 100.0 * (byte_size_after - byte_size_before) / byte_size_before
                         logging.info(f'{pref}SUCCESS. New version is {bytes_percentage_increase:3.0f}% '
                                      f'larger in bytes (pixel comparison not possible). {post}')
-                        return True, byte_size_after
+                        return True, None, byte_size_after
                     elif width_before == -1 or height_before == -1 or width_after == -1 or height_after == -1:
                         # could not check size of one version, this should not happen (corrupted download?)
                         logging.info(f'{pref}SKIPPED. Pixel size comparison inconclusive: '
                                      f'{width_before}*{height_before}px vs. {width_after}*{height_after}px. {post}')
-                        return False, byte_size_after
+                        return False, "pixelsize", byte_size_after
                     elif pixels_after >= pixels_before:
                         os.replace(tmp_filename, filename)
                         bytes_percentage_increase = 100.0 * (byte_size_after - byte_size_before) / byte_size_before
@@ -1187,20 +1188,20 @@ def download_file_if_larger(url, filename, index, count, sleep_time):
                             logging.info(f'{pref}SUCCESS. New version is actually {-bytes_percentage_increase:3.0f}% '
                                          f'smaller in bytes but {pixels_percentage_increase:3.0f}% '
                                          f'larger in pixels. {post}')
-                        return True, byte_size_after
+                        return True, None, byte_size_after
                     else:
                         logging.info(f'{pref}SKIPPED. Online version has {-pixels_percentage_increase:3.0f}% '
                                      f'smaller pixel size. {post}')
-                        return True, byte_size_after
+                        return True, None, byte_size_after
                 else:  # File did not exist before
                     os.replace(tmp_filename, filename)
-                    return True, byte_size_after
+                    return True, None, byte_size_after
             else:
                 logging.info(f'{pref}SKIPPED. Online version is same byte size, assuming same content. Not downloaded.')
-                return True, 0
+                return True, None, 0
     except Exception as err:
         logging.error(f"{pref}FAIL. Media couldn't be retrieved from {url} because of exception: {err}")
-        return False, 0
+        return False, f"{err}", 0
 
 
 def download_larger_media(media_sources: dict, paths: PathConfig, state: dict):
@@ -1231,12 +1232,14 @@ def download_larger_media(media_sources: dict, paths: PathConfig, state: dict):
                     success = state.get(media_url, {}).get('success', False)
                     bytes_downloaded = state.get(media_url, {}).get('bytes_downloaded', 0)
                 else:
-                    success, bytes_downloaded = download_file_if_larger(
-                        media_url, local_media_path, index + 1, number_of_files, sleep_time
-                    )
-                    state.update(
-                        {media_url: {"local": local_media_path, "success": success, "downloaded": bytes_downloaded}}
-                    )
+                    # Don't retry after certain status codes which are assumed to be permanent failures
+                    if state.get(media_url, {}).get('error') not in ["status 403", "status 404"]:
+                        success, download_error, bytes_downloaded = download_file_if_larger(
+                            media_url, local_media_path, index + 1, number_of_files, sleep_time
+                        )
+                        state.update(
+                            {media_url: {"local": local_media_path, "success": success, "error": download_error, "downloaded": bytes_downloaded}}
+                        )
 
                 if success:
                     success_count += 1
