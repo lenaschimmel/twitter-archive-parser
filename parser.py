@@ -1257,7 +1257,7 @@ def download_larger_media(media_sources: dict, paths: PathConfig, state: dict):
                 else:
                     percent = f'{(100*(index+1)/number_of_files):.1f}'
 
-                progress = f'{index+1:3d}/{number_of_files:3d} = {percent}% done. About {time_remaining_string} remaining.'
+                progress = f'{index+1:6d}/{number_of_files:5d} = {percent}% done. About {time_remaining_string} remaining.'
                 # Sleep briefly, in an attempt to minimize the possibility of triggering some auto-cutoff mechanism
                 print(progress, end='\r')
                 time.sleep(sleep_time)
