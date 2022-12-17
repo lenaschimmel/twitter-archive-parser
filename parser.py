@@ -2501,6 +2501,8 @@ def main():
         print(f'frequent. This script may not work if your account is protected. You may want to set it to public')
         print(f'before starting the download.\n')
 
+        # TODO: remove media that are already known to have the best quality from the list of media to download.
+
         estimated_download_time_str = format_duration(len(media_sources) * 0.4)
 
         if get_consent(f'OK to start downloading {len(media_sources)} media files? '
