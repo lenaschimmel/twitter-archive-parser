@@ -35,9 +35,11 @@ import sys
 import time
 import traceback
 from typing import List
+from zoneinfo import ZoneInfo
 # hot-loaded if needed, see import_module():
 #  imagesize
 #  requests
+#  tzlocal
 
 
 # Print a compile-time error in Python < 3.6. This line does nothing in Python 3.6+ but is reported to the user
@@ -634,6 +636,7 @@ def convert_tweet(
         media_sources: Optional[dict],
         users: dict[str, UserData],
         extended_user_data: dict,
+        local_timezone: ZoneInfo,
         paths: PathConfig,
 ) -> Tuple[int, str, str]:
     """Converts a JSON-format tweet. Returns tuple of timestamp, markdown and HTML."""
@@ -652,11 +655,13 @@ def convert_tweet(
         outer_tweet = None
 
     original_date_format = '%a %b %d %X %z %Y'  # Example: Tue Mar 19 14:05:17 +0000 2019
-    nicer_date_format = '%b %d %Y, %H:%M'  # Mar 19 20019, 14:05
+    nicer_date_format = '%b %d %Y, %H:%M'  # Mar 19 2019, 14:05
 
     tweet_datetime = datetime.datetime.strptime(tweet['created_at'], original_date_format)
     tweet_timestamp = int(round(tweet_datetime.timestamp()))
-    tweet_timestamp_str = tweet_datetime.strftime(nicer_date_format)
+
+    tweet_datetime_local = datetime.datetime.fromtimestamp(tweet_datetime.timestamp(), tz=local_timezone)
+    tweet_timestamp_str = tweet_datetime_local.strftime(nicer_date_format)
 
     # egg is a custom intermediate form, which contains pre-processed parts of the tweet
     # for conversion into md and html.
@@ -675,7 +680,8 @@ def convert_tweet(
         egg['is_retweeted'] = True
         retweet_datetime = datetime.datetime.strptime(outer_tweet['created_at'], original_date_format)
         retweet_timestamp = int(round(retweet_datetime.timestamp()))
-        retweet_timestamp_str = retweet_datetime.strftime(nicer_date_format)
+        retweet_datetime_local = datetime.datetime.fromtimestamp(retweet_datetime.timestamp(), tz=local_timezone)
+        retweet_timestamp_str = retweet_datetime_local.strftime(nicer_date_format)
 
         egg['retweeted_timestamp_str'] = retweet_timestamp_str
         egg['retweeted_timestamp'] = retweet_timestamp
@@ -759,7 +765,7 @@ def convert_tweet(
     add_user_metadata_to_egg(egg, users, extended_user_data, profile_image_size_suffix)
 
     md = convert_tweet_to_md(egg, paths)
-    html = convert_tweet_to_html(egg, own_user_data, users, extended_user_data, paths)
+    html = convert_tweet_to_html(egg, own_user_data, users, extended_user_data, local_timezone, paths)
 
     # Do some other stuff that is traditionally done while converting a tweet
     # This used to get the "simple" users dict, but we use extended_user_data now.
@@ -856,7 +862,8 @@ def convert_tweet_to_html(
     egg: dict,
     own_user_data: UserData,
     users: dict[str, UserData],
-    extended_user_data: dict, 
+    extended_user_data: dict,
+    local_timezone: ZoneInfo,
     paths: PathConfig,
 ) -> str:
    
@@ -916,7 +923,9 @@ def convert_tweet_to_html(
         else:
             inner_user_data = own_user_data
         try:
-            _, _, inner_tweet_html = convert_tweet(inner_tweet, None, inner_user_data, None, users, extended_user_data, paths)
+            _, _, inner_tweet_html = convert_tweet(
+                inner_tweet, None, inner_user_data, None, users, extended_user_data, local_timezone, paths
+            )
         except Exception as error:
             inner_tweet_html = f"<i>Could not convert quoted tweet because of error: {error}</i>"
         all_media_html += f'<div class="quote-tweet">{inner_tweet_html}</div>'
@@ -1456,6 +1465,7 @@ def convert_tweets(
         extended_user_data: dict,
         html_template: dict,
         known_tweets: dict[str, dict],
+        local_timezone: ZoneInfo,
         paths: PathConfig
 ) -> dict:
     """Third pass: convert tweets, using the downloaded references from pass 2"""
@@ -1466,7 +1476,9 @@ def convert_tweets(
             # known_tweets will contain tweets that do not belong directly into our output
             if 'from_archive' in tweet and tweet['from_archive'] is True:
                 # Generate output for this tweet, and at the same time collect its media ids
-                converted_tweets.append(convert_tweet(tweet, known_tweets, own_user_data, media_sources, users, extended_user_data, paths))
+                converted_tweets.append(convert_tweet(
+                    tweet, known_tweets, own_user_data, media_sources, users, extended_user_data, local_timezone, paths
+                ))
             else:
                 # Only collect media ids
                 collect_media_ids_from_tweet(tweet, media_sources, paths)
@@ -1486,13 +1498,18 @@ def convert_tweets(
 
     for (year, month), content in grouped_tweets.items():
         # Write into *.md files
-        md_string = '\n\n----\n\n'.join(md for md, _ in content)
+        month_str = datetime.datetime.strftime(datetime.datetime.strptime(str(month), '%m'), '%b')
+        md_string = f'## Tweets by @{own_user_data.handle} from {month_str} {year} \n\n'
+        md_string += f'Time zone: {local_timezone}\n\n----\n\n'
+        md_string += '\n\n----\n\n'.join(md for md, _ in content)
         md_path = paths.create_path_for_file_output_tweets(year, month, output_format="md")
         with open_and_mkdirs(md_path) as f:
             f.write(md_string)
 
         # Write into *.html files
-        html_string = '<hr>\n'.join(html for _, html in content)
+        html_string = f'<h2>Tweets by @{own_user_data.handle} from {month_str} {year}</h2>'
+        html_string += f'<p><small>Time zone: {local_timezone}</small></p><hr>'
+        html_string += '<hr>\n'.join(html for _, html in content)
         html_path = paths.create_path_for_file_output_tweets(year, month, output_format="html")
         with open_and_mkdirs(html_path) as f:
             f.write(html_template['begin'])
@@ -1598,7 +1615,7 @@ def collect_user_ids_from_direct_messages(paths) -> list:
     return list(dms_user_ids)
 
 
-def parse_direct_messages(username, users, user_id_url_template, paths: PathConfig):
+def parse_direct_messages(username, users, user_id_url_template, local_timezone: ZoneInfo, paths: PathConfig):
     """Parse paths.dir_input_data/direct-messages.js, write to one markdown file per conversation.
     """
     # read JSON file
@@ -1689,9 +1706,14 @@ def parse_direct_messages(username, users, user_id_url_template, paths: PathConf
                                         print(f'Warning: missing local file: {archive_media_path}. '
                                               f'Using original link instead: {original_expanded_url})')
 
-                            created_at = message_create['createdAt']  # example: 2022-01-27T15:58:52.744Z
-                            timestamp = \
-                                int(round(datetime.datetime.strptime(created_at, '%Y-%m-%dT%X.%fZ').timestamp()))
+                            message_created_at: str = message_create['createdAt']  # example: 2022-01-27T15:58:52.744Z
+                            created_at: datetime = datetime.datetime.strptime(
+                                message_created_at, '%Y-%m-%dT%X.%fZ').replace(tzinfo=datetime.timezone.utc)
+                            timestamp = int(round(created_at.timestamp()))
+                            nicer_date_format = '%b %d %Y, %H:%M'  # Mar 19 2019, 14:05
+                            created_at_local_time = \
+                                datetime.datetime.fromtimestamp(created_at.timestamp(), tz=local_timezone)
+                            created_at_local_time_str = created_at_local_time.strftime(nicer_date_format)
 
                             from_handle = escape_markdown(users[from_id].handle) if from_id in users \
                                 else user_id_url_template.format(from_id)
@@ -1700,7 +1722,7 @@ def parse_direct_messages(username, users, user_id_url_template, paths: PathConf
 
                             # make the body a quote
                             body_markdown = '> ' + '\n> '.join(body_markdown.splitlines())
-                            message_markdown = f'{from_handle} -> {to_handle}: ({created_at}) \n\n' \
+                            message_markdown = f'{from_handle} -> {to_handle}: ({created_at_local_time_str}) \n\n' \
                                                f'{body_markdown}'
                             messages.append((timestamp, message_markdown))
 
@@ -1731,7 +1753,8 @@ def parse_direct_messages(username, users, user_id_url_template, paths: PathConf
             for chunk_index, chunk in enumerate(chunks(messages, 1000)):
                 markdown = ''
                 markdown += f'### Conversation between {escaped_username} and {other_user_name}, ' \
-                            f'part {chunk_index+1}: ###\n\n----\n\n'
+                            f'part {chunk_index+1}: ###\n\n'
+                markdown += f'Time zone: {local_timezone}\n\n----\n\n'
                 markdown += '\n\n----\n\n'.join(md for _, md in chunk)
                 conversation_output_path = paths.create_path_for_file_output_dms(
                     name=other_user_short_name, index=(chunk_index + 1), output_format="md"
@@ -1745,7 +1768,8 @@ def parse_direct_messages(username, users, user_id_url_template, paths: PathConf
 
         else:
             markdown = ''
-            markdown += f'### Conversation between {escaped_username} and {other_user_name}: ###\n\n----\n\n'
+            markdown += f'### Conversation between {escaped_username} and {other_user_name}: ###\n\n'
+            markdown += f'Time zone: {local_timezone}\n\n----\n\n'
             markdown += '\n\n----\n\n'.join(md for _, md in messages)
             conversation_output_path = paths.create_path_for_file_output_dms(
                 name=other_user_short_name, output_format="md"
@@ -1822,7 +1846,13 @@ def collect_user_ids_from_group_direct_messages(paths) -> list:
     return list(group_dms_user_ids)
 
 
-def parse_group_direct_messages(username, users, user_id_url_template, paths):
+def parse_group_direct_messages(
+        username: str,
+        users: dict,
+        user_id_url_template: str,
+        local_timezone: ZoneInfo,
+        paths: PathConfig
+):
     """Parse data_folder/direct-messages-group.js, write to one markdown file per conversation.
     """
     # read JSON file from archive
@@ -1932,15 +1962,21 @@ def parse_group_direct_messages(username, users, user_id_url_template, paths):
                                     else:
                                         print(f'Warning: missing local file: {archive_media_path}. '
                                               f'Using original link instead: {original_expanded_url})')
-                            created_at = message_create['createdAt']  # example: 2022-01-27T15:58:52.744Z
-                            timestamp = int(round(
-                                datetime.datetime.strptime(created_at, '%Y-%m-%dT%X.%fZ').timestamp()
-                            ))
+
+                            message_created_at = message_create['createdAt']  # example: 2022-01-27T15:58:52.744Z
+                            created_at = datetime.datetime.strptime(
+                                message_created_at, '%Y-%m-%dT%X.%fZ').replace(tzinfo=datetime.timezone.utc)
+                            timestamp = int(round(created_at.timestamp()))
+                            nicer_date_format = '%b %d %Y, %H:%M'  # Mar 19 20019, 14:05
+                            created_at_local_time = \
+                                datetime.datetime.fromtimestamp(created_at.timestamp(), tz=local_timezone)
+                            created_at_local_time_str = created_at_local_time.strftime(nicer_date_format)
+
                             from_handle = escape_markdown(users[from_id].handle) if from_id in users \
                                 else user_id_url_template.format(from_id)
                             # make the body a quote
                             body_markdown = '> ' + '\n> '.join(body_markdown.splitlines())
-                            message_markdown = f'{from_handle}: ({created_at})\n\n' \
+                            message_markdown = f'{from_handle}: ({created_at_local_time_str})\n\n' \
                                                f'{body_markdown}'
                             messages.append((timestamp, message_markdown))
                     elif "conversationNameUpdate" in message:
@@ -1949,13 +1985,19 @@ def parse_group_direct_messages(username, users, user_id_url_template, paths):
                             from_id = conversation_name_update['initiatingUserId']
                             body_markdown = f"_changed group name to: " \
                                             f"{escape_markdown(conversation_name_update['name'])}_"
-                            created_at = conversation_name_update['createdAt']  # example: 2022-01-27T15:58:52.744Z
-                            timestamp = int(round(
-                                datetime.datetime.strptime(created_at, '%Y-%m-%dT%X.%fZ').timestamp()
-                            ))
+                            update_created_at = conversation_name_update['createdAt']
+                            # example: 2022-01-27T15:58:52.744Z
+                            created_at = datetime.datetime.strptime(
+                                update_created_at, '%Y-%m-%dT%X.%fZ').replace(tzinfo=datetime.timezone.utc)
+                            timestamp = int(round(created_at.timestamp()))
+                            nicer_date_format = '%b %d %Y, %H:%M'  # Mar 19 20019, 14:05
+                            created_at_local_time = \
+                                datetime.datetime.fromtimestamp(created_at.timestamp(), tz=local_timezone)
+                            created_at_local_time_str = created_at_local_time.strftime(nicer_date_format)
+
                             from_handle = escape_markdown(users[from_id].handle) if from_id in users \
                                 else user_id_url_template.format(from_id)
-                            message_markdown = f'{from_handle}: ({created_at})\n\n{body_markdown}'
+                            message_markdown = f'{from_handle}: ({created_at_local_time_str})\n\n{body_markdown}'
                             messages.append((timestamp, message_markdown))
                             # save metadata about name change:
                             group_conversations_metadata[conversation_id]['conversation_names'].append(
@@ -1965,24 +2007,32 @@ def parse_group_direct_messages(username, users, user_id_url_template, paths):
                         join_conversation = message['joinConversation']
                         if all(tag in join_conversation for tag in ['initiatingUserId', 'createdAt']):
                             from_id = join_conversation['initiatingUserId']
-                            created_at = join_conversation['createdAt']  # example: 2022-01-27T15:58:52.744Z
-                            timestamp = int(round(
-                                datetime.datetime.strptime(created_at, '%Y-%m-%dT%X.%fZ').timestamp()
-                            ))
+                            join_created_at = join_conversation['createdAt']  # example: 2022-01-27T15:58:52.744Z
+                            created_at = datetime.datetime.strptime(
+                                join_created_at, '%Y-%m-%dT%X.%fZ').replace(tzinfo=datetime.timezone.utc)
+                            timestamp = int(round(created_at.timestamp()))
+                            nicer_date_format = '%b %d %Y, %H:%M'  # Mar 19 20019, 14:05
+                            created_at_local_time = \
+                                datetime.datetime.fromtimestamp(created_at.timestamp(), tz=local_timezone)
+                            created_at_local_time_str = created_at_local_time.strftime(nicer_date_format)
                             from_handle = escape_markdown(users[from_id].handle) if from_id in users \
                                 else user_id_url_template.format(from_id)
                             escaped_username = escape_markdown(username)
                             body_markdown = f'_{from_handle} added {escaped_username} to the group_'
-                            message_markdown = f'{from_handle}: ({created_at})\n\n{body_markdown}'
+                            message_markdown = f'{from_handle}: ({created_at_local_time_str})\n\n{body_markdown}'
                             messages.append((timestamp, message_markdown))
                     elif "participantsJoin" in message:
                         participants_join = message['participantsJoin']
                         if all(tag in participants_join for tag in ['initiatingUserId', 'userIds', 'createdAt']):
                             from_id = participants_join['initiatingUserId']
-                            created_at = participants_join['createdAt']  # example: 2022-01-27T15:58:52.744Z
-                            timestamp = int(round(
-                                datetime.datetime.strptime(created_at, '%Y-%m-%dT%X.%fZ').timestamp()
-                            ))
+                            join_created_at = participants_join['createdAt']  # example: 2022-01-27T15:58:52.744Z
+                            created_at = datetime.datetime.strptime(
+                                join_created_at, '%Y-%m-%dT%X.%fZ').replace(tzinfo=datetime.timezone.utc)
+                            timestamp = int(round(created_at.timestamp()))
+                            nicer_date_format = '%b %d %Y, %H:%M'  # Mar 19 20019, 14:05
+                            created_at_local_time = \
+                                datetime.datetime.fromtimestamp(created_at.timestamp(), tz=local_timezone)
+                            created_at_local_time_str = created_at_local_time.strftime(nicer_date_format)
                             from_handle = escape_markdown(users[from_id].handle) if from_id in users \
                                 else user_id_url_template.format(from_id)
                             joined_ids = participants_join['userIds']
@@ -1992,15 +2042,19 @@ def parse_group_direct_messages(username, users, user_id_url_template, paths):
                                         (f' and {joined_handles[-1]}' if len(joined_handles) > 1 else
                                          joined_handles[0])
                             body_markdown = f'_{from_handle} added {name_list} to the group_'
-                            message_markdown = f'{from_handle}: ({created_at})\n\n{body_markdown}'
+                            message_markdown = f'{from_handle}: ({created_at_local_time_str})\n\n{body_markdown}'
                             messages.append((timestamp, message_markdown))
                     elif "participantsLeave" in message:
                         participants_leave = message['participantsLeave']
                         if all(tag in participants_leave for tag in ['userIds', 'createdAt']):
-                            created_at = participants_leave['createdAt']  # example: 2022-01-27T15:58:52.744Z
-                            timestamp = int(round(
-                                datetime.datetime.strptime(created_at, '%Y-%m-%dT%X.%fZ').timestamp()
-                            ))
+                            leave_created_at = participants_leave['createdAt']  # example: 2022-01-27T15:58:52.744Z
+                            created_at = datetime.datetime.strptime(
+                                leave_created_at, '%Y-%m-%dT%X.%fZ').replace(tzinfo=datetime.timezone.utc)
+                            timestamp = int(round(created_at.timestamp()))
+                            nicer_date_format = '%b %d %Y, %H:%M'  # Mar 19 20019, 14:05
+                            created_at_local_time = \
+                                datetime.datetime.fromtimestamp(created_at.timestamp(), tz=local_timezone)
+                            created_at_local_time_str = created_at_local_time.strftime(nicer_date_format)
                             left_ids = participants_leave['userIds']
                             left_handles = [escape_markdown(users[left_id].handle) if left_id in users
                                             else user_id_url_template.format(left_id) for left_id in left_ids]
@@ -2008,7 +2062,7 @@ def parse_group_direct_messages(username, users, user_id_url_template, paths):
                                         (f' and {left_handles[-1]}' if len(left_handles) > 1 else
                                          left_handles[0])
                             body_markdown = f'_{name_list} left the group_'
-                            message_markdown = f'{name_list}: ({created_at})\n\n{body_markdown}'
+                            message_markdown = f'{name_list}: ({created_at_local_time_str})\n\n{body_markdown}'
                             messages.append((timestamp, message_markdown))
 
             # collect messages per conversation in group_conversations_messages dict
@@ -2079,7 +2133,8 @@ def parse_group_direct_messages(username, users, user_id_url_template, paths):
             for chunk_index, chunk in enumerate(chunks(messages, 1000)):
                 markdown = ''
                 markdown += f'## {official_name} ##\n\n'
-                markdown += f'### Group conversation between {name_list}, part {chunk_index + 1}: ###\n\n----\n\n'
+                markdown += f'### Group conversation between {name_list}, part {chunk_index + 1}: ###\n\n'
+                markdown += f'Time zone: {local_timezone}\n\n----\n\n'
                 markdown += '\n\n----\n\n'.join(md for _, md in chunk)
                 conversation_output_filename = paths.create_path_for_file_output_dms(
                     name=group_name, output_format="md", kind="DMs-Group", index=chunk_index + 1
@@ -2093,7 +2148,8 @@ def parse_group_direct_messages(username, users, user_id_url_template, paths):
         else:
             markdown = ''
             markdown += f'## {official_name} ##\n\n'
-            markdown += f'### Group conversation between {name_list}: ###\n\n----\n\n'
+            markdown += f'### Group conversation between {name_list}: ###\n\n'
+            markdown += f'Time zone: {local_timezone}\n\n----\n\n'
             markdown += '\n\n----\n\n'.join(md for _, md in messages)
             conversation_output_filename = \
                 paths.create_path_for_file_output_dms(name=group_name, output_format="md", kind="DMs-Group")
@@ -2407,7 +2463,6 @@ def main():
     </style>
 </head>
 <body>
-    <h1>Your twitter archive</h1>
     <main class="container">""",
         "end": """    </main>
 </body>
@@ -2504,8 +2559,13 @@ def main():
 
     parse_followings(users, user_id_url_template, paths)
     parse_followers(users, user_id_url_template, paths)
-    parse_direct_messages(username, users, user_id_url_template, paths)
-    parse_group_direct_messages(username, users, user_id_url_template, paths)
+
+    # get local timezone info:
+    tzlocal = import_module('tzlocal')
+    local_timezone: ZoneInfo = tzlocal.get_localzone()
+
+    parse_direct_messages(username, users, user_id_url_template, local_timezone, paths)
+    parse_group_direct_messages(username, users, user_id_url_template, local_timezone, paths)
 
     # TODO Maybe this should be split up, so that downloaded media can be used during convert?
     # On the other hand, media in own tweets will be replaced by better versions, and
@@ -2515,7 +2575,9 @@ def main():
     # media_sources = collect_media_sources_from_tweets(...)
     # download_larger_media(...)
     # convert_tweets(...)
-    media_sources = convert_tweets(own_user_data, users, extended_user_data, html_template, tweets, paths)
+    media_sources = convert_tweets(
+        own_user_data, users, extended_user_data, html_template, tweets, local_timezone, paths
+    )
 
     # Download larger images and additional media, if the user agrees
     if len(media_sources) > 0:
