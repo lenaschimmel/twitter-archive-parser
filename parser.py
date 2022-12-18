@@ -765,7 +765,9 @@ def convert_tweet(
     add_user_metadata_to_egg(egg, users, extended_user_data, profile_image_size_suffix)
 
     md = convert_tweet_to_md(egg, paths)
-    html = convert_tweet_to_html(egg, own_user_data, users, extended_user_data, local_timezone, paths)
+    html = convert_tweet_to_html(
+        egg, known_tweets, own_user_data, users, extended_user_data, media_sources, local_timezone, paths
+    )
 
     # Do some other stuff that is traditionally done while converting a tweet
     # This used to get the "simple" users dict, but we use extended_user_data now.
@@ -785,7 +787,10 @@ def add_user_metadata_to_egg(egg: dict, users: dict, extended_user_data: dict, p
         user_description = user["description"]
         user_name = user["name"]
         user_id_str = user["id_str"]
-        profile_image_url_https = user['profile_image_url_https'].replace("_normal", profile_image_size_suffix)
+        if 'profile_image_url_https' in user and user['profile_image_url_https'] is not None:
+            profile_image_url_https = user['profile_image_url_https'].replace("_normal", profile_image_size_suffix)
+        else:
+            profile_image_url_https = None
         # TODO maybe link to nitter or local profile page, add config for this
         user_profile_url = f'https://twitter.com/{user_screen_name}'
     elif egg['user_id'] in users:
@@ -860,9 +865,11 @@ def convert_tweet_to_html_head(
 
 def convert_tweet_to_html(
     egg: dict,
+    known_tweets: dict,
     own_user_data: UserData,
     users: dict[str, UserData],
     extended_user_data: dict,
+    media_sources: dict,
     local_timezone: ZoneInfo,
     paths: PathConfig,
 ) -> str:
@@ -924,7 +931,7 @@ def convert_tweet_to_html(
             inner_user_data = own_user_data
         try:
             _, _, inner_tweet_html = convert_tweet(
-                inner_tweet, None, inner_user_data, None, users, extended_user_data, local_timezone, paths
+                inner_tweet, known_tweets, inner_user_data, media_sources, users, extended_user_data, local_timezone, paths
             )
         except Exception as error:
             inner_tweet_html = f"<i>Could not convert quoted tweet because of error: {error}</i>"
@@ -1235,7 +1242,7 @@ def download_larger_media(media_sources: dict, paths: PathConfig, state: dict):
     remaining_tries = 5
 
     remaining_media_sources = list(media_sources.items())
-   
+
     try:
         while remaining_tries > 0:
             new_remaining_media_sources = []
