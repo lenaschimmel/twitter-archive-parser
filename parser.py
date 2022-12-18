@@ -1628,6 +1628,8 @@ def parse_direct_messages(username, users, user_id_url_template, local_timezone:
     # read JSON file
     dms_json = read_json_from_js_file(os.path.join(paths.dir_input_data, 'direct-messages.js'))
 
+    print('')  # blank line for readability
+
     # Parse the DMs and store the messages in a dict
     conversations_messages = defaultdict(list)
     for conversation in dms_json:
@@ -1864,6 +1866,8 @@ def parse_group_direct_messages(
     """
     # read JSON file from archive
     group_dms_json = read_json_from_js_file(os.path.join(paths.dir_input_data, 'direct-messages-group.js'))
+
+    print('')  # blank line for readability
 
     # Parse the group DMs, store messages and metadata in a dict
     group_conversations_messages = defaultdict(list)
@@ -2501,6 +2505,8 @@ def main():
     tweet_ids_to_download = collect_tweet_ids_from_tweets(tweets)
     download_tweets(tweets, tweet_ids_to_download, paths)
 
+    print('')  # blank line for readability
+
     user_ids_from_tweets = collect_user_ids_from_tweets(tweets)
     # Make sure to include the owner's user id in the list to look up metadata for:
     # This is mostly useful for accounts who don't ever appear as mentioned or retweeted in their own tweets
@@ -2564,8 +2570,12 @@ def main():
 
     download_user_images(extended_user_data, paths, media_download_state)
 
+    print('')  # blank line for readability
+
     parse_followings(users, user_id_url_template, paths)
     parse_followers(users, user_id_url_template, paths)
+
+    print('')  # blank line for readability
 
     # get local timezone info:
     tzlocal = import_module('tzlocal')
@@ -2573,6 +2583,8 @@ def main():
 
     parse_direct_messages(username, users, user_id_url_template, local_timezone, paths)
     parse_group_direct_messages(username, users, user_id_url_template, local_timezone, paths)
+
+    print('')  # blank line for readability
 
     # TODO Maybe this should be split up, so that downloaded media can be used during convert?
     # On the other hand, media in own tweets will be replaced by better versions, and
@@ -2586,23 +2598,24 @@ def main():
         own_user_data, users, extended_user_data, html_template, tweets, local_timezone, paths
     )
 
+    # TODO: remove media that are already known to be unavailable or have the best quality
+    #  from the list of media to download.
+
     # Download larger images and additional media, if the user agrees
     if len(media_sources) > 0:
-        print(f"\nThe archive doesn't contain the original size of images from your own tweets. "
-              f"It also doesn't contain images from retweets, as well as animated gifs and some videos. "
-              f"We can attempt to download them from twimg.com.")
+        print(f"\nThe archive doesn't contain the original size of images from your own tweets.")
+        print(f"It also doesn't contain images from retweets, as well as animated gifs and some videos.")
+        print(f"We can attempt to download them from twimg.com.")
         print(f'Please be aware that this script may download a lot of data, which will cost you money if you are')
         print(f'paying for bandwidth. Please be aware that the servers might block these requests if they are too')
         print(f'frequent. This script may not work if your account is protected. You may want to set it to public')
         print(f'before starting the download.\n')
 
-        # TODO: remove media that are already known to have the best quality from the list of media to download.
-
         estimated_download_time_str = format_duration(len(media_sources) * 0.4)
 
         if get_consent(f'OK to start downloading {len(media_sources)} media files? '
                        f'This could take about {estimated_download_time_str}, or less if some '
-                       f'of the files are already downloaded before.', key='download_media'):
+                       f'of the files were already downloaded before.', key='download_media'):
 
             download_larger_media(media_sources, paths, media_download_state)
             print('In case you set your account to public before initiating the download, '
