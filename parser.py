@@ -774,7 +774,11 @@ def convert_tweet(
     # Not sure if we still need this step at all?
     # collect_user_connections_from_tweet(tweet, users)
 
-    return egg['timestamp'], md, html
+    timestamp: int = egg['timestamp']
+    if 'is_retweeted' in egg and egg['is_retweeted'] is True:
+        timestamp = egg['retweeted_timestamp']
+
+    return timestamp, md, html
 
 
 def add_user_metadata_to_egg(egg: dict, users: dict, extended_user_data: dict, profile_image_size_suffix: str) -> dict:
