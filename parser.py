@@ -629,6 +629,13 @@ class EmptyTweetFullTextError(ValueError):
     pass
 
 
+class QuoteRecursionDepthError(ValueError):
+    """
+    custom error class for nested quote-tweets that are above the recursion limit
+    """
+    pass
+
+
 def convert_tweet(
         tweet: dict,
         known_tweets: Optional[dict],
@@ -638,12 +645,18 @@ def convert_tweet(
         extended_user_data: dict,
         local_timezone: ZoneInfo,
         paths: PathConfig,
+        depth: int,
 ) -> Tuple[int, str, str]:
     """Converts a JSON-format tweet. Returns tuple of timestamp, markdown and HTML."""
     tweet = unwrap_tweet(tweet)
 
+    if depth >= 5:
+        raise QuoteRecursionDepthError('reached depth limit for nested quotes.')
+
     if 'full_text' not in tweet or tweet['full_text'] is None:
-        raise EmptyTweetFullTextError('empty full_text - tweet or user has probably been withheld, blocked you, or protected their account.')
+        raise EmptyTweetFullTextError(
+            'empty full_text - tweet or user has probably been withheld, or protected their account.'
+        )
 
     # Unwrap retweets
     if has_path(tweet, ['retweeted_status']):
@@ -755,8 +768,10 @@ def convert_tweet(
                     if known_tweets is not None and quoted_id in known_tweets:
                         egg['inner_tweet'] = known_tweets[quoted_id]
                     elif "from_archive" in tweet and tweet["from_archive"] is True:
-                        print(f'Tweet {tweet["id_str"]} is part of the original archive and quotes tweet {quoted_id} but quoted tweet is not known.')
-                        # if a tweet that is not from the archive contains a tweet, it's expected to be unknown, since we don't recurse deeper into quoted tweets.
+                        print(f'Tweet {tweet["id_str"]} is part of the original archive and quotes tweet {quoted_id} '
+                              f'but quoted tweet is not known.')
+                        # if a tweet that is not from the archive contains a tweet, it's expected to be unknown,
+                        # since we don't recurse deeper into quoted tweets.
 
     if media_sources is not None:
         egg['media'] = collect_media_ids_from_tweet(tweet, media_sources, paths)
@@ -766,7 +781,7 @@ def convert_tweet(
 
     md = convert_tweet_to_md(egg, paths)
     html = convert_tweet_to_html(
-        egg, known_tweets, own_user_data, users, extended_user_data, media_sources, local_timezone, paths
+        egg, known_tweets, own_user_data, users, extended_user_data, media_sources, local_timezone, paths, depth
     )
 
     # Do some other stuff that is traditionally done while converting a tweet
@@ -876,6 +891,7 @@ def convert_tweet_to_html(
     media_sources: dict,
     local_timezone: ZoneInfo,
     paths: PathConfig,
+    depth: int,
 ) -> str:
    
     body_html = egg['full_text'].replace('\n', '<br/>\n')
@@ -935,7 +951,15 @@ def convert_tweet_to_html(
             inner_user_data = own_user_data
         try:
             _, _, inner_tweet_html = convert_tweet(
-                inner_tweet, known_tweets, inner_user_data, media_sources, users, extended_user_data, local_timezone, paths
+                inner_tweet,
+                known_tweets,
+                inner_user_data,
+                media_sources,
+                users,
+                extended_user_data,
+                local_timezone,
+                paths,
+                depth=depth+1,
             )
         except Exception as error:
             inner_tweet_html = f"<i>Could not convert quoted tweet because of error: {error}</i>"
@@ -1488,12 +1512,22 @@ def convert_tweets(
             if 'from_archive' in tweet and tweet['from_archive'] is True:
                 # Generate output for this tweet, and at the same time collect its media ids
                 converted_tweets.append(convert_tweet(
-                    tweet, known_tweets, own_user_data, media_sources, users, extended_user_data, local_timezone, paths
+                    tweet,
+                    known_tweets,
+                    own_user_data,
+                    media_sources,
+                    users,
+                    extended_user_data,
+                    local_timezone,
+                    paths,
+                    depth=0,
                 ))
             else:
                 # Only collect media ids
                 collect_media_ids_from_tweet(tweet, media_sources, paths)
         except EmptyTweetFullTextError as err:
+            print(f"Could not convert tweet {tweet['id_str']} because: {err}")
+        except QuoteRecursionDepthError as err:
             print(f"Could not convert tweet {tweet['id_str']} because: {err}")
         except Exception as err:
             traceback.print_exc()
