@@ -2636,12 +2636,19 @@ def main():
         own_user_data, users, extended_user_data, html_template, tweets, local_timezone, paths
     )
 
-    # TODO: remove media that are already known to be unavailable or have the best quality
-    #  from the list of media to download.
+    # remove media that are already known to have the best quality from the list of media to download.
+    # TODO: also remove media that are already known to be unavailable.
+    new_media_sources = {}
+    for filename, online_url in media_sources.items():
+        if online_url not in media_download_state.keys() or \
+                media_download_state[online_url]["success"] is not True:
+            new_media_sources[filename] = online_url
+
+    media_sources = new_media_sources
 
     # Download larger images and additional media, if the user agrees
     if len(media_sources) > 0:
-        print(f"\nThe archive doesn't contain the original size of images from your own tweets.")
+        print(f"\nThe archive doesn't contain the original size version of some images from your own tweets.")
         print(f"It also doesn't contain images from retweets, as well as animated gifs and some videos.")
         print(f"We can attempt to download them from twimg.com.")
         print(f'Please be aware that this script may download a lot of data, which will cost you money if you are')
@@ -2652,8 +2659,7 @@ def main():
         estimated_download_time_str = format_duration(len(media_sources) * 0.4)
 
         if get_consent(f'OK to start downloading {len(media_sources)} media files? '
-                       f'This could take about {estimated_download_time_str}, or less if some '
-                       f'of the files were already downloaded before.', key='download_media'):
+                       f'This would take at least {estimated_download_time_str}.', key='download_media'):
 
             download_larger_media(media_sources, paths, media_download_state)
             print('In case you set your account to public before initiating the download, '
