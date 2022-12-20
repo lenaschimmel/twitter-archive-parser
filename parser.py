@@ -1252,7 +1252,7 @@ def download_file_if_larger(url, filename, progress: str) -> Tuple[bool, Optiona
         return False, f"{err}", 0
 
 
-def download_larger_media(media_sources: dict, paths: PathConfig, state: dict):
+def download_larger_media(media_sources: dict, error_codes_to_exclude: list[str], paths: PathConfig, state: dict):
     """Uses (filename, URL) items in media_sources to download files from remote storage.
        Aborts download if the remote file is the same size or smaller than the existing local version.
        Retries the failed downloads several times, with increasing pauses between each to avoid being blocked.
@@ -1278,9 +1278,9 @@ def download_larger_media(media_sources: dict, paths: PathConfig, state: dict):
                 local_media_path, media_url = item[0], item[1]
                 if state.get(media_url, {}).get('success'):
                     continue
-                if state.get(media_url, {}).get('error') in ["status 403", "status 404"]:
-                   continue
-                new_remaining_media_sources.append( (local_media_path, media_url) )
+                if state.get(media_url, {}).get('error') in error_codes_to_exclude:
+                    continue
+                new_remaining_media_sources.append((local_media_path, media_url))
 
             remaining_media_sources = new_remaining_media_sources
 
@@ -1292,7 +1292,7 @@ def download_larger_media(media_sources: dict, paths: PathConfig, state: dict):
                 print(f"\nTry to download remaining {number_of_files} files...\n")
 
             for index, (local_media_path, media_url) in enumerate(remaining_media_sources):
-                 # show % done and estimated remaining time:
+                # show % done and estimated remaining time:
                 time_elapsed: float = time.time() - start_time
                 estimated_time_per_file: float = time_elapsed / (index + 1)
 
@@ -1320,7 +1320,7 @@ def download_larger_media(media_sources: dict, paths: PathConfig, state: dict):
                 if success:
                     success_count += 1
                 else:
-                    retries.append( (local_media_path, media_url) )
+                    retries.append((local_media_path, media_url))
                 total_bytes_downloaded += bytes_downloaded
 
             remaining_media_sources = retries
@@ -2370,7 +2370,12 @@ def read_extended_user_data_from_cache(paths: PathConfig) -> dict:
         return extended_users_dict
 
 
-def download_user_images(extended_user_data: dict[str, dict], paths: PathConfig, media_download_state: dict) -> None:
+def download_user_images(
+        extended_user_data: dict[str, dict],
+        paths: PathConfig,
+        media_download_state: dict,
+        error_codes_to_exclude: list[str],
+) -> None:
     # Change suffix to choose another image size:
     # URL suffix  -> image width and height
     # _normal.ext -> 48
@@ -2398,7 +2403,7 @@ def download_user_images(extended_user_data: dict[str, dict], paths: PathConfig,
                        f'(approx {estimated_download_size_str:,} KB)? '
                        f'This could take about {estimated_download_time_str}, or less if some '
                        f'of the files are already downloaded before.', key='download_profile_images'):
-            download_larger_media(to_download, paths, media_download_state)
+            download_larger_media(to_download, error_codes_to_exclude, paths, media_download_state)
 
 
 def export_media_download_state(media_download_state: dict, paths: PathConfig):
@@ -2606,7 +2611,10 @@ def main():
 
     export_user_data(users, extended_user_data, paths)
 
-    download_user_images(extended_user_data, paths, media_download_state)
+    # media downloads that returned with these errors before will not be retried
+    error_codes_to_exclude = ["status 403", "status 404"]
+
+    download_user_images(extended_user_data, paths, media_download_state, error_codes_to_exclude)
 
     print('')  # blank line for readability
 
@@ -2637,11 +2645,13 @@ def main():
     )
 
     # remove media that are already known to have the best quality from the list of media to download.
-    # TODO: also remove media that are already known to be unavailable.
+    # also remove media that are already known to be unavailable.
     new_media_sources = {}
     for filename, online_url in media_sources.items():
         if online_url not in media_download_state.keys() or \
-                media_download_state[online_url]["success"] is not True:
+                (media_download_state[online_url]["success"] is not True and
+                 media_download_state[online_url]["error"] not in error_codes_to_exclude):
+
             new_media_sources[filename] = online_url
 
     media_sources = new_media_sources
@@ -2661,7 +2671,7 @@ def main():
         if get_consent(f'OK to start downloading {len(media_sources)} media files? '
                        f'This would take at least {estimated_download_time_str}.', key='download_media'):
 
-            download_larger_media(media_sources, paths, media_download_state)
+            download_larger_media(media_sources, error_codes_to_exclude, paths, media_download_state)
             print('In case you set your account to public before initiating the download, '
                   'do not forget to protect it again.')
 
